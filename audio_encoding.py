@@ -11,7 +11,7 @@ import sys
 import pandas as pd # <-- Make sure this is included
 
 # --- CRITICAL: SET THIS TO YOUR MAX SENTENCE LENGTH ---
-DURATION = 8.0 # e.g., 8.0 seconds. 1.0 is too short.
+DURATION = 10.0 # e.g., 8.0 seconds. 1.0 is too short.
 # ---
 
 SAMPLE_RATE = 16000

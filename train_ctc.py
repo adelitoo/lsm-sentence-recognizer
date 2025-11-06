@@ -1,3 +1,4 @@
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
@@ -60,25 +61,31 @@ def greedy_decoder(log_probs: torch.Tensor) -> str:
 # --- 2. Define the PyTorch Readout Model ---
 class CTCReadout(nn.Module):
     """
-    A simple Linear layer to "read out" the LSM state.
-    This is the classifier your professor mentioned.
+    A more powerful readout model using a GRU layer to better learn
+    temporal patterns from the LSM state.
     """
     def __init__(self, input_features, num_classes):
         super().__init__()
-        # input_features = number of LSM output neurons (e.g., 400)
-        # num_classes = number of characters + 1 (for blank)
-        self.linear = nn.Linear(input_features, num_classes)
+        self.gru = nn.GRU(
+            input_size=input_features, 
+            hidden_size=256, # More capacity
+            num_layers=2,      # Deeper is better
+            batch_first=True,  # Input shape is (batch, seq, feature)
+            bidirectional=True # Look at past and future
+        )
+        # The GRU output will have 2 * hidden_size features because it's bidirectional
+        self.linear = nn.Linear(256 * 2, num_classes)
 
     def forward(self, x):
         # Input x shape: (Batch_Size, Time_Steps, LSM_Features)
-        # e.g., (8, 400, 400)
         
-        # Pass through the linear layer
-        x = self.linear(x)
+        # Pass through the GRU
+        gru_out, _ = self.gru(x)
         
-        # Apply Log Softmax (CTCLoss expects log probabilities)
-        # We apply it on dimension 2 (the class dimension)
-        # Output shape: (Batch_Size, Time_Steps, Num_Classes)
+        # Pass the GRU output through the linear layer
+        x = self.linear(gru_out)
+        
+        # Apply Log Softmax for CTC Loss
         return F.log_softmax(x, dim=2)
 
 
@@ -90,6 +97,8 @@ def train():
     
     # --- Load Data ---
     print("Loading data...")
+    # The .npz file contains the analog trace history of the LSM output neurons,
+    # which is a dense, float-valued signal.
     dataset = np.load("lsm_trace_sequences.npz")
     X_train = dataset['X_train_sequences']
     y_train_indices = dataset['y_train']
@@ -107,6 +116,17 @@ def train():
     print(f"Training samples: {len(X_train)}")
     print(f"Test samples: {len(X_test)}")
     print(f"Sample train label 0: {y_train_indices[0]} -> '{y_train_text[0]}'")
+
+    # --- Visualize the first training sample ---
+    print("\nVisualizing the first training sample...")
+    plt.figure(figsize=(15, 5))
+    plt.imshow(X_train[0].T, aspect='auto', cmap='viridis')
+    plt.title(f"LSM Trace for Sample 0: '{y_train_text[0]}'")
+    plt.xlabel("Time Steps")
+    plt.ylabel("LSM Output Neurons")
+    plt.colorbar(label="Trace Value")
+    plt.savefig("lsm_trace_visualization.png")
+    print("✅ Visualization saved to lsm_trace_visualization.png")
 
     # --- Convert to PyTorch Tensors ---
     X_train_tensor = torch.FloatTensor(X_train)
@@ -129,7 +149,7 @@ def train():
     # reduction='mean' averages the loss over the batch
     loss_fn = nn.CTCLoss(blank=BLANK_TOKEN, reduction='mean', zero_infinity=True)
     
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    optimizer = optim.Adam(model.parameters(), lr=0.0005)
 
     # --- Prepare CTC Targets ---
     # CTCLoss needs the labels in a specific format
@@ -158,7 +178,7 @@ def train():
     print("="*60 + "\n")
 
     # --- The Training Loop ---
-    num_epochs = 300
+    num_epochs = 2000
     print(f"Starting training for {num_epochs} epochs...")
     
     for epoch in range(num_epochs):

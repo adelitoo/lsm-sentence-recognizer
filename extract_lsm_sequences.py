@@ -6,7 +6,7 @@ full, time-series ANALOG TRACE from the reservoir neurons.
 """
 
 import numpy as np
-from snn import SNN, SimulationParams # Assuming SNN is in snn.py
+from snnpy.snn import SNN, SimulationParams
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 from pathlib import Path
@@ -101,15 +101,14 @@ def main(multiplier: float):
         lsm.reset()
         lsm.set_input_spike_times(sample)
         lsm.simulate(trace_tau=TRACE_TAU, reset_trace=True)
-        all_train_sequences.append(lsm.get_trace_history_output().copy())
+        all_train_sequences.append(lsm.get_trace_history_output())
         
     all_test_sequences = []
     for sample in tqdm(X_test, desc="Testing"):
         lsm.reset()
         lsm.set_input_spike_times(sample)
         lsm.simulate(trace_tau=TRACE_TAU, reset_trace=True)
-        # !!! This was the bug - fixed to use the trace history !!!
-        all_test_sequences.append(lsm.get_trace_history_output().copy())
+        all_test_sequences.append(lsm.get_trace_history_output())
         
     # Save as float32, not int8
     X_train_seq = np.array(all_train_sequences, dtype=np.float32)
@@ -141,7 +140,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--multiplier", 
         type=float, 
-        default=0.6, # You will tune this value
+        default=1.0, # You will tune this value
         help="Multiplier for w_critico (e.g., 0.6 for 60%%)"
     )
     args = parser.parse_args()

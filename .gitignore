@@ -209,3 +209,10 @@ __marimo__/
 sentences/
 sentence_label_map.txt
 sentence_spike_trains.npz
+*.png
+report.txt
+librispeech_download/LibriSpeech/
+lsm_trace_sequences.npz
+lsm_trace_visualization.png
+GEMINI.md
+librispeech_download/
