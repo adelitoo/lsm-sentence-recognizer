@@ -15,10 +15,10 @@ DURATION = 10.0 # e.g., 8.0 seconds. 1.0 is too short.
 # ---
 
 SAMPLE_RATE = 16000
-TIME_BINS = 100 # This will be 400 after thresholding
+TIME_BINS = 500 # This will be 400 after thresholding
 SPIKE_THRESHOLDS = [0.70, 0.80, 0.90, 0.95]
 HYSTERESIS_GAP = 0.1
-MAX_SAMPLES_PER_CLASS = 10000 # Set to a high number
+MAX_SAMPLES_PER_CLASS = 1000 # Set to a high number
 VISUALIZE_FIRST_SAMPLE = False
 REDUNDANCY_FACTOR = 1 # Keep this at 1
 

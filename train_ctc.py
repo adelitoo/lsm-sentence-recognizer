@@ -169,14 +169,6 @@ def train():
     # For us, they are all the same length (400)
     X_train_input_lengths = torch.LongTensor([num_timesteps] * num_samples)
 
-    # --- A quick warning about this tiny dataset ---
-    print("\n" + "="*60)
-    print("⚠️  NOTE: Your dataset has only 8 training samples.")
-    print("    The model will overfit *instantly*. This is normal.")
-    print("    Our goal is to prove the pipeline works,")
-    print("    not to build a perfect model (yet).")
-    print("="*60 + "\n")
-
     # --- The Training Loop ---
     num_epochs = 2000
     print(f"Starting training for {num_epochs} epochs...")
