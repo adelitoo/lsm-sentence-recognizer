@@ -11,11 +11,13 @@ import sys
 import pandas as pd # <-- Make sure this is included
 
 # --- CRITICAL: SET THIS TO YOUR MAX SENTENCE LENGTH ---
-DURATION = 10.0 # e.g., 8.0 seconds. 1.0 is too short.
+# IMPORTANT: Sentences are ~1.7s, so 3.0s gives reasonable padding
+# Using 10.0s creates 83% silent padding which breaks CTC learning!
+DURATION = 3.0  # Adjusted to match actual sentence lengths (~1.7s)
 # ---
 
 SAMPLE_RATE = 16000
-TIME_BINS = 500 # This will be 400 after thresholding
+TIME_BINS = 500  # This will be 2000 after multi-threshold encoding
 SPIKE_THRESHOLDS = [0.70, 0.80, 0.90, 0.95]
 HYSTERESIS_GAP = 0.1
 MAX_SAMPLES_PER_CLASS = 1000 # Set to a high number

@@ -22,8 +22,12 @@ echo "Running audio encoding..."
 python audio_encoding.py
 
 echo ""
-echo "Extracting LSM sequences..."
-python extract_lsm_sequences.py
+echo "Extracting LSM windowed features (NEW APPROACH)..."
+python extract_lsm_windowed_features.py --multiplier 0.6
+
+echo ""
+echo "Analyzing feature quality..."
+python analyze_lsm_features.py
 
 echo ""
 echo "Training CTC model..."

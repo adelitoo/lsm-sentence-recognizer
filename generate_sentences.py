@@ -2,7 +2,7 @@ from elevenlabs.client import ElevenLabs
 import csv  # <-- 1. Import the CSV library
 from pathlib import Path # <-- Good practice for handling paths
 
-client = ElevenLabs(api_key="sk_a3614def3d14243a3bebfbb352bd93fdbc30d120d0f9571e") # REMINDER: Be careful sharing API keys!
+client = ElevenLabs(api_key="sk_a3614def3d14243a3bebfbb352bd93fdbc30d120d0f9571e") 
 
 sentences = [
     "The cat sleeps on the mat",
@@ -18,10 +18,7 @@ sentences = [
 ]
 
 voices = [
-    "JBFqnCBsd6RMkjVDRZzb",  
-    "TxGEqnHWrfWFTfGW9XjX",  
-    "pNInz6obpgDQGcFmaJgB",  
-    "EXAVITQu4vr4xnSDxMaL",  
+    "JBFqnCBsd6RMkjVDRZzb",    
 ]
 
 output_dir = Path("sentences")

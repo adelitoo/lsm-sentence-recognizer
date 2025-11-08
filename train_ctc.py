@@ -68,13 +68,13 @@ class CTCReadout(nn.Module):
         super().__init__()
         self.gru = nn.GRU(
             input_size=input_features, 
-            hidden_size=256, # More capacity
+            hidden_size=32, # More capacity
             num_layers=2,      # Deeper is better
             batch_first=True,  # Input shape is (batch, seq, feature)
             bidirectional=True # Look at past and future
         )
         # The GRU output will have 2 * hidden_size features because it's bidirectional
-        self.linear = nn.Linear(256 * 2, num_classes)
+        self.linear = nn.Linear(32 * 2, num_classes)
 
     def forward(self, x):
         # Input x shape: (Batch_Size, Time_Steps, LSM_Features)
@@ -94,12 +94,25 @@ def train():
     print("="*60)
     print("🧠 Starting CTC Readout Layer Training...")
     print("="*60)
-    
+
     # --- Load Data ---
     print("Loading data...")
-    # The .npz file contains the analog trace history of the LSM output neurons,
-    # which is a dense, float-valued signal.
-    dataset = np.load("lsm_trace_sequences.npz")
+    # Try to load windowed features first, fall back to traces
+    feature_file = "lsm_windowed_features.npz"
+    trace_file = "lsm_trace_sequences.npz"
+
+    if Path(feature_file).exists():
+        print(f"✅ Loading windowed features from '{feature_file}'")
+        dataset = np.load(feature_file)
+    elif Path(trace_file).exists():
+        print(f"⚠️  Windowed features not found, using traces from '{trace_file}'")
+        print(f"   For better results, run: python extract_lsm_windowed_features.py")
+        dataset = np.load(trace_file)
+    else:
+        print(f"❌ Error: Neither '{feature_file}' nor '{trace_file}' found.")
+        print("Please run feature extraction first.")
+        return
+
     X_train = dataset['X_train_sequences']
     y_train_indices = dataset['y_train']
     X_test = dataset['X_test_sequences']
@@ -144,12 +157,16 @@ def train():
     
     # --- Initialize Model, Loss, and Optimizer ---
     model = CTCReadout(input_features=num_lsm_neurons, num_classes=num_classes)
-    
+
     # CTCLoss(blank=0) tells the loss function that index 0 is the blank token
     # reduction='mean' averages the loss over the batch
     loss_fn = nn.CTCLoss(blank=BLANK_TOKEN, reduction='mean', zero_infinity=True)
-    
-    optimizer = optim.Adam(model.parameters(), lr=0.0005)
+
+    # Use a learning rate scheduler for better convergence
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='min', factor=0.5, patience=50
+    )
 
     # --- Prepare CTC Targets ---
     # CTCLoss needs the labels in a specific format
@@ -170,23 +187,25 @@ def train():
     X_train_input_lengths = torch.LongTensor([num_timesteps] * num_samples)
 
     # --- The Training Loop ---
-    num_epochs = 2000
+    num_epochs = 1000
     print(f"Starting training for {num_epochs} epochs...")
-    
+
+    best_loss = float('inf')
+
     for epoch in range(num_epochs):
         model.train() # Set model to training mode
         optimizer.zero_grad() # Reset gradients
-        
+
         # --- Forward Pass ---
         # Get log probabilities from the model
         # Shape: (Batch_Size, Time_Steps, Num_Classes)
         log_probs = model(X_train_tensor)
-        
+
         # --- Prepare for CTCLoss ---
         # CTCLoss expects (Time_Steps, Batch_Size, Num_Classes)
         # So we must permute (swap) the first two dimensions
         log_probs_for_loss = log_probs.permute(1, 0, 2)
-        
+
         # --- Calculate Loss ---
         loss = loss_fn(
             log_probs_for_loss,  # Model output
@@ -194,26 +213,36 @@ def train():
             X_train_input_lengths, # Length of each LSM sequence (all 400)
             y_train_target_lengths # Length of each text label
         )
-        
+
         # --- Backward Pass ---
         loss.backward()
+        # Gradient clipping to prevent exploding gradients
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
-        
+
+        # Update learning rate based on loss
+        scheduler.step(loss)
+
+        # Track best loss
+        if loss.item() < best_loss:
+            best_loss = loss.item()
+
         # --- Print Progress ---
         if (epoch + 1) % 20 == 0:
-            print(f"Epoch {epoch + 1}/{num_epochs}, Loss: {loss.item():.4f}")
-            
+            current_lr = optimizer.param_groups[0]['lr']
+            print(f"Epoch {epoch + 1}/{num_epochs}, Loss: {loss.item():.4f}, Best: {best_loss:.4f}, LR: {current_lr:.6f}")
+
             # --- Check a prediction (Greedy Decode) ---
             model.eval() # Set model to evaluation mode
             with torch.no_grad():
                 # Get prediction for the first test sample
                 test_sample_log_probs = model(X_test_tensor[0].unsqueeze(0))
-                
+
                 # Squeeze to (Time_Steps, Num_Classes)
                 test_sample_log_probs = test_sample_log_probs.squeeze(0)
-                
+
                 decoded_text = greedy_decoder(test_sample_log_probs)
-                
+
                 print(f"  Test Sample 0 Target: '{y_test_text[0]}'")
                 print(f"  Test Sample 0 Decoded: '{decoded_text}'\n")
 
