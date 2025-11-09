@@ -97,19 +97,23 @@ def train():
 
     # --- Load Data ---
     print("Loading data...")
-    # Try to load windowed features first, fall back to traces
+    # Try to load features in order of preference: filtered > windowed > traces
+    filtered_file = "lsm_windowed_features_filtered.npz"
     feature_file = "lsm_windowed_features.npz"
     trace_file = "lsm_trace_sequences.npz"
 
-    if Path(feature_file).exists():
+    if Path(filtered_file).exists():
+        print(f"✅ Loading FILTERED windowed features from '{filtered_file}'")
+        dataset = np.load(filtered_file)
+    elif Path(feature_file).exists():
         print(f"✅ Loading windowed features from '{feature_file}'")
         dataset = np.load(feature_file)
     elif Path(trace_file).exists():
         print(f"⚠️  Windowed features not found, using traces from '{trace_file}'")
-        print(f"   For better results, run: python extract_lsm_windowed_features.py")
+        print(f"   For better results, run: python extract_lsm_windowed_features_filtered.py")
         dataset = np.load(trace_file)
     else:
-        print(f"❌ Error: Neither '{feature_file}' nor '{trace_file}' found.")
+        print(f"❌ Error: No feature file found.")
         print("Please run feature extraction first.")
         return
 
@@ -187,7 +191,7 @@ def train():
     X_train_input_lengths = torch.LongTensor([num_timesteps] * num_samples)
 
     # --- The Training Loop ---
-    num_epochs = 1000
+    num_epochs = 5000
     print(f"Starting training for {num_epochs} epochs...")
 
     best_loss = float('inf')

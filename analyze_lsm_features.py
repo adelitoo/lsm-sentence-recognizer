@@ -15,10 +15,15 @@ from pathlib import Path
 
 def load_features():
     """Load windowed features or traces"""
+    filtered_file = "lsm_windowed_features_filtered.npz"
     feature_file = "lsm_windowed_features.npz"
     trace_file = "lsm_trace_sequences.npz"
 
-    if Path(feature_file).exists():
+    if Path(filtered_file).exists():
+        print(f"✅ Loading FILTERED windowed features from '{filtered_file}'")
+        data = np.load(filtered_file)
+        feature_type = "filtered_windowed"
+    elif Path(feature_file).exists():
         print(f"✅ Loading windowed features from '{feature_file}'")
         data = np.load(feature_file)
         feature_type = "windowed"

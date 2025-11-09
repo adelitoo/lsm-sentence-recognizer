@@ -147,8 +147,8 @@ def visualize_hysteresis_channel(spectrogram, channel_index, thresholds, hystere
 
 def create_dataset(n_filters: int, filterbank: str):
     """Create dataset from a metadata CSV for sentences."""
-    
-    BASE_DATASET_PATH = Path("sentences")
+
+    BASE_DATASET_PATH = Path("sentences_augmented")  # Using augmented dataset
     METADATA_FILE = BASE_DATASET_PATH / "sentences.csv"
     
     all_spike_trains = []
