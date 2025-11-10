@@ -19,7 +19,7 @@ from tqdm import tqdm
 import pandas as pd
 
 # Augmentation parameters
-NUM_AUGMENTATIONS_PER_FILE = 10  # Create 10 versions of each audio file
+NUM_AUGMENTATIONS_PER_FILE = 5  # Create 5 versions of each audio file (100 sentences × 5 = 500 augmented)
 SAMPLE_RATE = 16000
 
 # Augmentation ranges

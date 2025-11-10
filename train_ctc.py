@@ -66,15 +66,17 @@ class CTCReadout(nn.Module):
     """
     def __init__(self, input_features, num_classes):
         super().__init__()
+        # Increased capacity for high-dimensional features (1211 dims)
         self.gru = nn.GRU(
-            input_size=input_features, 
-            hidden_size=32, # More capacity
-            num_layers=2,      # Deeper is better
+            input_size=input_features,
+            hidden_size=128,   # Increased from 32 to 128 (4x more capacity!)
+            num_layers=3,      # Increased from 2 to 3 layers
             batch_first=True,  # Input shape is (batch, seq, feature)
-            bidirectional=True # Look at past and future
+            bidirectional=True, # Look at past and future
+            dropout=0.2        # Add dropout for regularization
         )
         # The GRU output will have 2 * hidden_size features because it's bidirectional
-        self.linear = nn.Linear(32 * 2, num_classes)
+        self.linear = nn.Linear(128 * 2, num_classes)
 
     def forward(self, x):
         # Input x shape: (Batch_Size, Time_Steps, LSM_Features)
@@ -145,9 +147,26 @@ def train():
     plt.savefig("lsm_trace_visualization.png")
     print("✅ Visualization saved to lsm_trace_visualization.png")
 
+    # --- Normalize Features (important for high-dimensional inputs!) ---
+    print("\nNormalizing features...")
+    # Flatten for normalization
+    X_train_flat = X_train.reshape(-1, X_train.shape[-1])
+    X_test_flat = X_test.reshape(-1, X_test.shape[-1])
+
+    # Compute mean and std from training set
+    feature_mean = X_train_flat.mean(axis=0)
+    feature_std = X_train_flat.std(axis=0) + 1e-8  # Add epsilon to avoid division by zero
+
+    # Normalize
+    X_train_normalized = (X_train - feature_mean) / feature_std
+    X_test_normalized = (X_test - feature_mean) / feature_std
+
+    print(f"  Original range: [{X_train.min():.2f}, {X_train.max():.2f}]")
+    print(f"  Normalized range: [{X_train_normalized.min():.2f}, {X_train_normalized.max():.2f}]")
+
     # --- Convert to PyTorch Tensors ---
-    X_train_tensor = torch.FloatTensor(X_train)
-    X_test_tensor = torch.FloatTensor(X_test)
+    X_train_tensor = torch.FloatTensor(X_train_normalized)
+    X_test_tensor = torch.FloatTensor(X_test_normalized)
     
     # --- Parameters for Model & CTC ---
     # From your lsm_sequences.npz output
@@ -167,9 +186,10 @@ def train():
     loss_fn = nn.CTCLoss(blank=BLANK_TOKEN, reduction='mean', zero_infinity=True)
 
     # Use a learning rate scheduler for better convergence
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    # Lower initial LR for larger model with more parameters
+    optimizer = optim.Adam(model.parameters(), lr=0.0005, weight_decay=1e-5)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', factor=0.5, patience=50
+        optimizer, mode='min', factor=0.5, patience=100
     )
 
     # --- Prepare CTC Targets ---
