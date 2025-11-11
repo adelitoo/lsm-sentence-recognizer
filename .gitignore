@@ -206,13 +206,27 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
+# Old dataset files (not used)
 sentences/
 sentence_label_map.txt
 sentence_spike_trains.npz
+lsm_trace_sequences.npz
+
+# Allow 500-sentence dataset files (for GPU training)
+!sentences_500/
+!sentence_label_map_500.txt
+!sentence_spike_trains_500.npz
+!lsm_trace_sequences_sentence_split_500.npz  # For trace-based training
+!lsm_windowed_features_filtered_sentence_split_500.npz  # For char/word training
+!balanced_sentence_split_500.npz
+
+# Visualizations and reports
 *.png
 report.txt
-librispeech_download/LibriSpeech/
-lsm_trace_sequences.npz
-lsm_trace_visualization.png
-GEMINI.md
+
+# External datasets
 librispeech_download/
+
+# Old documentation
+GEMINI.md
+README_500_SENTENCES.md
