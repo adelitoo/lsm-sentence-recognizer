@@ -1,21 +1,29 @@
+
 """
 Generate 500 Diverse Sentences for Training
-
-Strategy:
-- Use sentence templates with word banks
-- Ensure high vocabulary diversity
-- Cover various grammatical structures
-- Balance sentence complexity
+- Using 'chatterbox-tts' for local, free audio generation.
 """
 
-from elevenlabs.client import ElevenLabs
 import csv
 from pathlib import Path
 import random
+import torch
+import torchaudio as ta
 
-client = ElevenLabs(api_key="sk_a3614def3d14243a3bebfbb352bd93fdbc30d120d0f9571e")
+# --- Check for chatterbox-tts installation ---
+try:
+    from chatterbox.tts import ChatterboxTTS
+except ImportError:
+    print("Error: 'chatterbox-tts' library not found.")
+    print("Please install it by running: pip install chatterbox-tts")
+    print("You also need: pip install torch torchaudio")
+    exit()
 
-# Sentence templates with word banks
+
+# ===================================================
+# === TEMPLATE AND SENTENCE GENERATION ===
+# ===================================================
+
 templates = []
 
 # === TEMPLATE 1: Subject + Verb + Location ===
@@ -27,8 +35,8 @@ locations1 = ["on the mat", "in the park", "by the tree", "under the bush",
               "in the forest", "under the bridge", "on the porch", "in the barn"]
 
 for s in subjects1:
-    for v in verbs1[:4]:  # Use first 4 verbs to avoid too many combinations
-        for l in locations1[:4]:
+    for v in verbs1[:4]:  # Use first 4 verbs
+        for l in locations1[:4]: # Use first 4 locations
             templates.append(f"{s} {v} {l}")
 
 # === TEMPLATE 2: Subject + Verb + Adverb ===
@@ -184,8 +192,8 @@ for s in subjects12:
         for a in actions12[:2]:
             templates.append(f"{s} {m} {a}")
 
-# Remove duplicates and shuffle
-templates = list(set(templates))
+# === Finalize Sentence List ===
+templates = list(set(templates)) # Remove duplicates
 random.seed(42)  # For reproducibility
 random.shuffle(templates)
 
@@ -194,50 +202,77 @@ sentences = templates[:500]
 
 print(f"Generated {len(sentences)} unique sentences")
 print(f"\nSample sentences:")
-for i in range(10):
+for i in range(min(10, len(sentences))): # Show up to 10 samples
     print(f"  {i+1}. {sentences[i]}")
 
-# Now generate audio using ElevenLabs
-voices = ["JBFqnCBsd6RMkjVDRZzb"]
+
+# ===================================================
+# === AUDIO GENERATION (using Chatterbox) ===
+# ===================================================
+
+# 1. Automatically detect the best device
+if torch.cuda.is_available():
+    device = "cuda"
+elif torch.backends.mps.is_available(): # For Apple Silicon Macs
+    device = "mps"
+else:
+    device = "cpu"
+
+print(f"\n{'='*80}")
+print(f"Initializing ChatterboxTTS on device: '{device}'")
+if device == "cpu":
+    print("WARNING: Running on CPU. Generation will be significantly slower.")
+print("This may take a while on the first run to download the model...")
+
+# 2. Load the model
+try:
+    model = ChatterboxTTS.from_pretrained(device=device)
+    model_sr = model.sr  # Get the model's sample rate
+except Exception as e:
+    print(f"\nCritical Error loading model: {e}")
+    print("Please ensure you have a working internet connection for the first download.")
+    exit()
 
 output_dir = Path("sentences_500")
 output_dir.mkdir(exist_ok=True)
 metadata_file = output_dir / "sentences.csv"
 
-print(f"\n{'='*80}")
-print(f"Starting audio generation for {len(sentences)} sentences...")
-print(f"This will take approximately {len(sentences) * 2 / 60:.0f} minutes")
+print(f"\nStarting audio generation for {len(sentences)} sentences...")
+print(f"Audio files will be saved in: '{output_dir.resolve()}'")
 print(f"{'='*80}\n")
 
+# 3. Process and Save
 with open(metadata_file, "w", newline="", encoding="utf-8") as f:
     writer = csv.writer(f)
     writer.writerow(["filename", "label_text"])
 
     for i, text in enumerate(sentences):
-        voice_id = voices[i % len(voices)]
-
         # Progress indicator
-        if (i + 1) % 50 == 0:
-            print(f"Progress: {i + 1}/{len(sentences)} ({(i+1)/len(sentences)*100:.1f}%)")
+        print(f"Progress: {i + 1}/{len(sentences)}", end='\r')
 
-        audio = client.text_to_speech.convert(
-            text=text,
-            voice_id=voice_id,
-            model_id="eleven_multilingual_v2",
-            output_format="mp3_44100_128",
-        )
-
-        filename = f"sentence_{i + 1}.mp3"
+        # Note: Chatterbox saves as .wav
+        filename = f"sentence_{i + 1}.wav"
         filepath = output_dir / filename
 
-        with open(filepath, "wb") as audio_f:
-            for chunk in audio:
-                audio_f.write(chunk)
+        try:
+            # 4. Generate the audio waveform
+            wav = model.generate(text)
+            
+            # 5. Save the audio file
+            ta.save(filepath, wav, model_sr)
 
-        writer.writerow([filename, text])
+            # 6. Write to CSV
+            writer.writerow([filename, text])
 
-print(f"\n{'='*80}")
-print(f"✅ All {len(sentences)} audio sentences generated successfully!")
-print(f"✅ Metadata saved to '{metadata_file}'")
-print(f"✅ Audio files saved to '{output_dir}/'")
+        except Exception as e:
+            print(f"\n--- Error generating audio for: '{text}' ---")
+            print(f"Error: {e}")
+            print("Skipping this sentence.")
+            print("-" * (len(text) + 34))
+
+
+print(f"\n\n{'='*80}")
+print(f"✅ All processing complete!")
+print(f"✅ Metadata saved to '{metadata_file.resolve()}'")
+print(f"✅ Audio files saved to '{output_dir.resolve()}/'")
 print(f"{'='*80}")

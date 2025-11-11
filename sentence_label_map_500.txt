@@ -1,0 +1,501 @@
+label_id,label_text
+0,We runs carefully
+1,The writer teaches a plan
+2,Why is it today
+3,The fox sleeps under the bush
+4,A bird sits on the mat
+5,The player helps the students
+6,I runs quickly
+7,The player teaches a plan
+8,The writer helps the people
+9,She should go now
+10,The rabbit sleeps by the tree
+11,The fox hides in the park
+12,She counted four chairs
+13,They found one birds
+14,A mouse rests by the tree
+15,They walks quickly
+16,The worker teaches a plan
+17,The wolf rests under the bush
+18,A deer sleeps under the bush
+19,The woman walks quickly
+20,The painter teaches the students
+21,The owl rests on the mat
+22,Take the window
+23,She moves quickly
+24,A bear hides in the park
+25,The wind blows through the trees
+26,A bird hides in the park
+27,The owl sits by the tree
+28,The farmer teaches a plan
+29,The rabbit sleeps under the bush
+30,I start at six
+31,The wolf sits on the mat
+32,The builder makes the people
+33,What did you go now
+34,I see two birds
+35,My friend moves carefully
+36,The rabbit rests by the tree
+37,Show your book
+38,Our book is very old
+39,The child's car is very old
+40,The horse rests under the bush
+41,A bird sleeps by the tree
+42,Tell me more
+43,Clouds shines on the ground
+44,The singer teaches a plan
+45,The dog sleeps in the park
+46,The storm blows on the ground
+47,The wolf sits by the tree
+48,The builder makes a plan
+49,You can go now
+50,A bear rests in the park
+51,She counted four birds
+52,Open your book
+53,We have two birds
+54,The girl runs slowly
+55,The owl sleeps under the bush
+56,They found four books
+57,She counted two birds
+58,The singer makes the students
+59,I moves carefully
+60,The baker makes a plan
+61,We moves slowly
+62,The writer makes the people
+63,Lightning shines on the ground
+64,Our house is on the table
+65,Take the door
+66,A squirrel hides in the park
+67,He can do this
+68,His car is very old
+69,The wind falls through the trees
+70,They found three books
+71,My car is very old
+72,Why did you go today
+73,The fox sits on the mat
+74,He can go now
+75,A squirrel sleeps by the tree
+76,My friends start at noon
+77,The teacher helps a plan
+78,They found three birds
+79,They could go now
+80,She should do this
+81,Thunder shines on the ground
+82,Good night
+83,The man walks slowly
+84,Keep the window
+85,We have five birds
+86,The woman moves slowly
+87,The dancer makes the people
+88,The wolf sleeps by the tree
+89,The farmer makes a plan
+90,A mouse rests under the bush
+91,A squirrel rests by the tree
+92,I see four books
+93,The moon falls through the trees
+94,The wind falls in the sky
+95,The doctor makes the people
+96,The family arrive at six
+97,We should do this
+98,Who is it now
+99,The wolf sleeps on the mat
+100,The family arrive at noon
+101,The man walks quickly
+102,A bird sits under the bush
+103,They start at noon
+104,Your book is very old
+105,A bear sits on the mat
+106,There are three chairs
+107,The baker makes the students
+108,Thunder shines through the trees
+109,The student walks slowly
+110,The fox rests by the tree
+111,I think so too
+112,Thunder falls on the ground
+113,I should do this
+114,Who did you go today
+115,She runs quickly
+116,The player makes a plan
+117,This is worse than before
+118,You did great
+119,He runs slowly
+120,A bear hides by the tree
+121,When is it now
+122,The wolf sleeps under the bush
+123,I can go now
+124,That is better than before
+125,We have one chairs
+126,The boy walks carefully
+127,I start at noon
+128,We have four books
+129,The rain blows on the ground
+130,A bird rests by the tree
+131,The horse sits under the bush
+132,The teacher helps the people
+133,They runs carefully
+134,The girl runs quickly
+135,The builder helps the people
+136,Make your book
+137,Tell the door
+138,The student runs quickly
+139,They arrive at seven
+140,The driver makes the students
+141,She can go now
+142,Who is it today
+143,Mist shines on the ground
+144,We could do this
+145,I leave at noon
+146,Take your book
+147,They walks carefully
+148,I arrive at noon
+149,The cat hides in the park
+150,Where is it now
+151,He walks slowly
+152,The wolf sits under the bush
+153,We have five chairs
+154,I start at seven
+155,Your house is on the table
+156,The girl moves carefully
+157,The rain shines on the ground
+158,The painter helps a plan
+159,This is worse than the other one
+160,The student walks quickly
+161,My friend walks slowly
+162,The owl sits under the bush
+163,Fog blows on the ground
+164,The boy moves slowly
+165,There are four chairs
+166,We have four chairs
+167,The child's car is on the table
+168,The rain blows in the sky
+169,A mouse sits under the bush
+170,The cat hides by the tree
+171,Lightning shines through the trees
+172,A mouse hides on the mat
+173,I see four birds
+174,They found two chairs
+175,The cat sleeps by the tree
+176,We walks slowly
+177,The singer makes a plan
+178,Her book is very old
+179,What did you go today
+180,A squirrel hides under the bush
+181,The teacher teaches the students
+182,How did you go now
+183,Thank you very much
+184,I moves quickly
+185,The worker helps a plan
+186,The driver helps the students
+187,His book is very old
+188,Their house is very old
+189,Thunder falls in the sky
+190,Snow blows through the trees
+191,The child walks slowly
+192,Their book is on the table
+193,Make the window
+194,Her house is very old
+195,The rabbit hides in the park
+196,The farmer helps a plan
+197,He arrive at six
+198,The cat sleeps on the mat
+199,We moves quickly
+200,I see five books
+201,Mist falls through the trees
+202,The rabbit sits under the bush
+203,The driver makes the people
+204,A deer sits on the mat
+205,The doctor helps the students
+206,We start at six
+207,Everything is better than the other one
+208,I arrive at six
+209,I see four chairs
+210,A deer sleeps by the tree
+211,The player helps a plan
+212,A bird sits by the tree
+213,Your car is very old
+214,The moon shines through the trees
+215,We should go now
+216,The baker helps a plan
+217,We could go now
+218,The woman runs slowly
+219,I walks quickly
+220,A deer sits by the tree
+221,We runs slowly
+222,The fox sits in the park
+223,The baker helps the students
+224,They found four birds
+225,The student moves carefully
+226,The child's house is very old
+227,Clouds blows through the trees
+228,Have a nice day
+229,The doctor makes the students
+230,Something is better than the other one
+231,The girl moves quickly
+232,Fog falls on the ground
+233,The student moves slowly
+234,She start at noon
+235,The rabbit sits on the mat
+236,This is better than the other one
+237,He start at seven
+238,I arrive at seven
+239,When did you go now
+240,A deer rests on the mat
+241,Something is worse than the other one
+242,The horse hides on the mat
+243,The doctor makes a plan
+244,A squirrel rests under the bush
+245,Snow blows in the sky
+246,A mouse sleeps under the bush
+247,He could do this
+248,The player makes the people
+249,A deer hides on the mat
+250,A deer hides in the park
+251,The wolf rests in the park
+252,A mouse rests in the park
+253,The owl hides on the mat
+254,The owl sleeps on the mat
+255,You could do this
+256,They found three chairs
+257,Lightning blows on the ground
+258,The player helps the people
+259,We have four birds
+260,You should do this
+261,She can do this
+262,The rain blows through the trees
+263,The fox hides on the mat
+264,The doctor teaches the people
+265,My house is very old
+266,The fox sleeps in the park
+267,The rain falls through the trees
+268,I see one chairs
+269,The cat hides under the bush
+270,Can I help you
+271,The storm shines in the sky
+272,A bear sits in the park
+273,My friend runs slowly
+274,There are two birds
+275,She walks carefully
+276,Her house is on the table
+277,She counted five books
+278,The cat rests by the tree
+279,He arrive at seven
+280,We have one books
+281,The builder teaches a plan
+282,The dog sits by the tree
+283,I see two books
+284,My friends arrive at noon
+285,She start at seven
+286,We start at seven
+287,Just a minute
+288,Nothing is better than the other one
+289,They should go now
+290,The cat hides on the mat
+291,Lightning falls on the ground
+292,Good evening
+293,The horse sleeps in the park
+294,They moves carefully
+295,Why did you go now
+296,Snow shines on the ground
+297,Her car is on the table
+298,She arrive at noon
+299,The wind shines on the ground
+300,My friends leave at noon
+301,I runs carefully
+302,The cat rests under the bush
+303,Clouds blows in the sky
+304,A bird sleeps in the park
+305,We have three birds
+306,There are three birds
+307,We have one birds
+308,Mist falls in the sky
+309,The family arrive at seven
+310,The worker helps the students
+311,Lightning blows through the trees
+312,A bear sits under the bush
+313,The worker teaches the people
+314,My friends start at seven
+315,A squirrel sits in the park
+316,The worker makes the people
+317,I can do this
+318,Nice to meet you
+319,She counted one books
+320,The family start at six
+321,She counted five chairs
+322,The singer teaches the people
+323,The storm falls on the ground
+324,The painter makes the people
+325,The storm blows through the trees
+326,Mist shines through the trees
+327,They can do this
+328,She counted two books
+329,The owl sits on the mat
+330,Make the door
+331,They moves slowly
+332,We walks carefully
+333,The man moves slowly
+334,The fox rests in the park
+335,Something is worse than before
+336,Nothing is better than before
+337,The child runs quickly
+338,The cat sleeps under the bush
+339,The sun falls in the sky
+340,When is it today
+341,The fox sleeps on the mat
+342,The storm blows in the sky
+343,The baker teaches the students
+344,No problem at all
+345,My friends leave at six
+346,Which did you go now
+347,Find your book
+348,The dancer helps a plan
+349,The doctor helps the people
+350,Maybe you are right
+351,The rabbit rests under the bush
+352,The horse rests by the tree
+353,The boy walks quickly
+354,The writer teaches the students
+355,The cat rests in the park
+356,There are five books
+357,The moon shines in the sky
+358,Their car is very old
+359,The child runs slowly
+360,The farmer makes the students
+361,The rabbit rests on the mat
+362,The rabbit sits by the tree
+363,The builder teaches the people
+364,The fox rests under the bush
+365,The student runs carefully
+366,Hold the window
+367,She leave at noon
+368,The worker makes a plan
+369,Something is better than before
+370,That is correct
+371,They arrive at six
+372,The doctor helps a plan
+373,I see three books
+374,Her book is on the table
+375,We have three chairs
+376,The horse rests on the mat
+377,Fog shines through the trees
+378,The family start at noon
+379,Open the door
+380,The player teaches the students
+381,That is worse than the other one
+382,He could go now
+383,They found one chairs
+384,Where did you go today
+385,A deer rests by the tree
+386,You are welcome
+387,I walks carefully
+388,Nothing is worse than before
+389,They found five books
+390,The cat sleeps in the park
+391,She counted four books
+392,The rabbit sleeps in the park
+393,The singer helps the people
+394,Fog blows in the sky
+395,The wolf hides under the bush
+396,I see three birds
+397,He walks carefully
+398,A bear rests on the mat
+399,The cat sits in the park
+400,Thunder shines in the sky
+401,The rain shines through the trees
+402,The woman moves carefully
+403,The moon falls in the sky
+404,My book is very old
+405,A mouse sits by the tree
+406,The moon blows on the ground
+407,The builder helps the students
+408,The boy runs quickly
+409,You can do this
+410,I walks slowly
+411,The boy walks slowly
+412,The rain falls in the sky
+413,The boy moves carefully
+414,The baker teaches the people
+415,A mouse sits on the mat
+416,A bear sleeps on the mat
+417,See you later
+418,The wind blows in the sky
+419,The writer teaches the people
+420,Clouds shines through the trees
+421,There are five chairs
+422,The dog rests under the bush
+423,A bear rests under the bush
+424,The teacher makes a plan
+425,The family leave at seven
+426,They leave at seven
+427,He moves quickly
+428,A bear sleeps by the tree
+429,She leave at seven
+430,A bird hides by the tree
+431,She could go now
+432,How did you go today
+433,The horse sits by the tree
+434,Bring the door
+435,The builder teaches the students
+436,Close your book
+437,How is it today
+438,The writer helps the students
+439,She runs slowly
+440,The storm falls through the trees
+441,I see one books
+442,We leave at six
+443,The worker teaches the students
+444,She counted two chairs
+445,Send the door
+446,It is worse than the other one
+447,We have two chairs
+448,The rabbit rests in the park
+449,Close the door
+450,The wolf hides on the mat
+451,The farmer helps the students
+452,I see two chairs
+453,The man runs carefully
+454,Keep your book
+455,The dog hides by the tree
+456,A deer rests in the park
+457,The dog rests by the tree
+458,A deer sleeps in the park
+459,The singer makes the people
+460,A squirrel rests on the mat
+461,The farmer makes the people
+462,Your book is on the table
+463,We arrive at seven
+464,You could go now
+465,Show the window
+466,The teacher makes the people
+467,The child walks carefully
+468,The fox sleeps by the tree
+469,Lightning shines in the sky
+470,We can do this
+471,The man runs quickly
+472,The teacher teaches the people
+473,Keep the door
+474,The owl rests under the bush
+475,Lightning falls through the trees
+476,Our car is on the table
+477,There are four birds
+478,Please come in
+479,He start at six
+480,I could do this
+481,A mouse hides under the bush
+482,She counted three chairs
+483,My friend walks carefully
+484,Bring the window
+485,They arrive at noon
+486,The rabbit sits in the park
+487,Good morning
+488,The rabbit hides by the tree
+489,The dog sleeps under the bush
+490,A deer sits in the park
+491,The man moves quickly
+492,Fog blows through the trees
+493,Clouds falls in the sky
+494,Snow shines in the sky
+495,The moon blows through the trees
+496,The wolf hides in the park
+497,I see one birds
+498,The rabbit sleeps on the mat
+499,My car is on the table
