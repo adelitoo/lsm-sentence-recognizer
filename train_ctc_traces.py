@@ -118,7 +118,7 @@ def train():
 
     print(f"✅ Loading MEMBRANE POTENTIAL TRACES from '{trace_file}'")
     print(f"   🎯 Testing TRUE GENERALIZATION to unseen sentences!")
-    dataset = np.load(trace_file)
+    dataset = np.load(trace_file, allow_pickle=True)    
 
     X_train = dataset["X_train_sequences"]
     y_train_indices = dataset["y_train"]
