@@ -6,6 +6,8 @@ import torch.optim as optim
 import torch.nn.functional as F
 from pathlib import Path
 import itertools
+# --- MODIFIED: Added imports for DataLoader ---
+from torch.utils.data import Dataset, DataLoader
 
 # --- 1. Define the Character Set (Vocabulary) ---
 # The CTCLoss "blank" token is conventionally 0
@@ -89,16 +91,60 @@ class CTCReadout(nn.Module):
         return F.log_softmax(x, dim=2)
 
 
+# --- ADDED: Custom Dataset for DataLoader ---
+class LsmDataset(Dataset):
+    """Custom Dataset for loading LSM sequences and text."""
+    def __init__(self, x_data, y_text_list):
+        self.x_data = torch.FloatTensor(x_data) # Keep on CPU
+        # Pre-encode text to save time
+        self.y_encoded = [encode_text(text) for text in y_text_list]
+
+    def __len__(self):
+        return len(self.x_data)
+
+    def __getitem__(self, idx):
+        # Return CPU tensors. Batch will be moved to GPU.
+        return self.x_data[idx], self.y_encoded[idx]
+
+# --- ADDED: Custom Collate Function for CTC ---
+def ctc_collate_fn(batch):
+    """
+    Custom collate function to batch variable-length text sequences for CTCLoss.
+    'batch' is a list of (x_sample, y_encoded_sample)
+    """
+    # 1. Stack all X samples
+    x_samples = torch.stack([item[0] for item in batch])
+    
+    # 2. Handle Y targets for CTCLoss
+    y_encoded_samples = [item[1] for item in batch]
+    y_target_lengths = torch.LongTensor([len(seq) for seq in y_encoded_samples])
+    y_targets_concatenated = torch.cat(y_encoded_samples)
+    
+    # 3. Get input lengths (all the same in this case)
+    # x_samples shape is (Batch, Time, Features)
+    num_timesteps = x_samples.shape[1]
+    x_input_lengths = torch.LongTensor([num_timesteps] * len(batch))
+    
+    return x_samples, y_targets_concatenated, x_input_lengths, y_target_lengths
+
+
 # --- 3. The Main Training Function ---
 def train():
     print("="*60)
     print("🧠 Starting CTC Readout Layer Training...")
     print("="*60)
     
-    # --- Load Data ---
+    # --- Training Parameters ---
+    BATCH_SIZE = 32 # Adjust this based on your VRAM
+    NUM_EPOCHS = 2000
+    LEARNING_RATE = 0.0005
+    
+    # --- Detect and set the device ---
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"✅ Using device: {device}")
+    
+    # --- Load Data (as NumPy arrays) ---
     print("Loading data...")
-    # The .npz file contains the analog trace history of the LSM output neurons,
-    # which is a dense, float-valued signal.
     dataset = np.load("lsm_trace_sequences.npz")
     X_train = dataset['X_train_sequences']
     y_train_indices = dataset['y_train']
@@ -128,13 +174,24 @@ def train():
     plt.savefig("lsm_trace_visualization.png")
     print("✅ Visualization saved to lsm_trace_visualization.png")
 
-    # --- Convert to PyTorch Tensors ---
-    X_train_tensor = torch.FloatTensor(X_train)
-    X_test_tensor = torch.FloatTensor(X_test)
+    # --- MODIFIED: Create DataLoader ---
+    # Create CPU tensor for test data. We'll move samples to GPU one-by-one.
+    X_test_tensor_cpu = torch.FloatTensor(X_test)
     
+    # Create Dataset and DataLoader for training
+    train_dataset = LsmDataset(X_train, y_train_text)
+    train_loader = DataLoader(
+        train_dataset, 
+        batch_size=BATCH_SIZE, 
+        shuffle=True, 
+        collate_fn=ctc_collate_fn, # Use our custom batching function
+        pin_memory=True,          # Helps speed up CPU-to-GPU transfer
+        num_workers=4             # Spawns processes to load data (set to 0 if this causes errors)
+    )
+    print(f"✅ Created DataLoader with batch size {BATCH_SIZE}")
+
     # --- Parameters for Model & CTC ---
-    # From your lsm_sequences.npz output
-    num_samples, num_timesteps, num_lsm_neurons = X_train_tensor.shape
+    num_samples, num_timesteps, num_lsm_neurons = X_train.shape
     num_classes = len(CHAR_MAP) + 1 # +1 for the BLANK token
     
     print("\n--- Model Configuration ---")
@@ -144,74 +201,70 @@ def train():
     
     # --- Initialize Model, Loss, and Optimizer ---
     model = CTCReadout(input_features=num_lsm_neurons, num_classes=num_classes)
+    model.to(device) # Move the model to the GPU
     
-    # CTCLoss(blank=0) tells the loss function that index 0 is the blank token
-    # reduction='mean' averages the loss over the batch
     loss_fn = nn.CTCLoss(blank=BLANK_TOKEN, reduction='mean', zero_infinity=True)
-    
-    optimizer = optim.Adam(model.parameters(), lr=0.0005)
+    optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
-    # --- Prepare CTC Targets ---
-    # CTCLoss needs the labels in a specific format
+    # --- MODIFIED: The Training Loop (Mini-Batch) ---
+    print(f"Starting training for {NUM_EPOCHS} epochs...")
     
-    # 1. Encode all target text into integer sequences
-    y_train_encoded = [encode_text(text) for text in y_train_text]
-    
-    # 2. Concatenate all sequences into one long tensor
-    # e.g., [2,5,3] and [1,4] becomes [2,5,3,1,4]
-    y_train_targets = torch.cat(y_train_encoded)
-    
-    # 3. Create a tensor of the *length* of each text label
-    # e.g., [3, 2]
-    y_train_target_lengths = torch.LongTensor([len(seq) for seq in y_train_encoded])
-    
-    # 4. Create a tensor of the *length* of each input sequence
-    # For us, they are all the same length (400)
-    X_train_input_lengths = torch.LongTensor([num_timesteps] * num_samples)
-
-    # --- The Training Loop ---
-    num_epochs = 2000
-    print(f"Starting training for {num_epochs} epochs...")
-    
-    for epoch in range(num_epochs):
+    for epoch in range(NUM_EPOCHS):
         model.train() # Set model to training mode
-        optimizer.zero_grad() # Reset gradients
+        total_epoch_loss = 0.0
         
-        # --- Forward Pass ---
-        # Get log probabilities from the model
-        # Shape: (Batch_Size, Time_Steps, Num_Classes)
-        log_probs = model(X_train_tensor)
+        # --- Batch Loop ---
+        for i, (batch_X, batch_y_targets, batch_X_lengths, batch_y_lengths) in enumerate(train_loader):
+            
+            # Move this batch's data to the GPU
+            batch_X = batch_X.to(device)
+            batch_y_targets = batch_y_targets.to(device)
+            batch_X_lengths = batch_X_lengths.to(device)
+            batch_y_lengths = batch_y_lengths.to(device)
+            
+            optimizer.zero_grad() # Reset gradients for this batch
+            
+            # --- Forward Pass ---
+            # Shape: (Batch_Size, Time_Steps, Num_Classes)
+            log_probs = model(batch_X)
+            
+            # --- Prepare for CTCLoss ---
+            # CTCLoss expects (Time_Steps, Batch_Size, Num_Classes)
+            log_probs_for_loss = log_probs.permute(1, 0, 2)
+            
+            # --- Calculate Loss ---
+            loss = loss_fn(
+                log_probs_for_loss,  # Model output
+                batch_y_targets,     # Concatenated batch labels
+                batch_X_lengths,     # Length of each sequence in batch
+                batch_y_lengths      # Length of each label in batch
+            )
+            
+            # --- Backward Pass ---
+            loss.backward()
+            optimizer.step()
+            
+            total_epoch_loss += loss.item()
+        # --- End of Batch Loop ---
         
-        # --- Prepare for CTCLoss ---
-        # CTCLoss expects (Time_Steps, Batch_Size, Num_Classes)
-        # So we must permute (swap) the first two dimensions
-        log_probs_for_loss = log_probs.permute(1, 0, 2)
-        
-        # --- Calculate Loss ---
-        loss = loss_fn(
-            log_probs_for_loss,  # Model output
-            y_train_targets,       # Concatenated text labels
-            X_train_input_lengths, # Length of each LSM sequence (all 400)
-            y_train_target_lengths # Length of each text label
-        )
-        
-        # --- Backward Pass ---
-        loss.backward()
-        optimizer.step()
+        avg_epoch_loss = total_epoch_loss / len(train_loader)
         
         # --- Print Progress ---
         if (epoch + 1) % 20 == 0:
-            print(f"Epoch {epoch + 1}/{num_epochs}, Loss: {loss.item():.4f}")
+            print(f"Epoch {epoch + 1}/{NUM_EPOCHS}, Avg. Loss: {avg_epoch_loss:.4f}")
             
             # --- Check a prediction (Greedy Decode) ---
             model.eval() # Set model to evaluation mode
             with torch.no_grad():
                 # Get prediction for the first test sample
-                test_sample_log_probs = model(X_test_tensor[0].unsqueeze(0))
+                # Move just this one sample to the GPU
+                test_sample_gpu = X_test_tensor_cpu[0].unsqueeze(0).to(device)
+                test_sample_log_probs = model(test_sample_gpu)
                 
                 # Squeeze to (Time_Steps, Num_Classes)
                 test_sample_log_probs = test_sample_log_probs.squeeze(0)
                 
+                # greedy_decoder uses .item(), which pulls data from GPU to CPU
                 decoded_text = greedy_decoder(test_sample_log_probs)
                 
                 print(f"  Test Sample 0 Target: '{y_test_text[0]}'")

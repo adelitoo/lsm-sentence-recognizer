@@ -8,19 +8,16 @@ import warnings
 import argparse
 from gammatone import gtgram
 import sys
-import pandas as pd # <-- Make sure this is included
+import pandas as pd
 
-# --- CRITICAL: SET THIS TO YOUR MAX SENTENCE LENGTH ---
-DURATION = 10.0 # e.g., 8.0 seconds. 1.0 is too short.
-# ---
+DURATION = 2.0
 
 SAMPLE_RATE = 16000
-TIME_BINS = 500 # This will be 400 after thresholding
+TIME_BINS = 100 
 SPIKE_THRESHOLDS = [0.70, 0.80, 0.90, 0.95]
 HYSTERESIS_GAP = 0.1
-MAX_SAMPLES_PER_CLASS = 1000 # Set to a high number
-VISUALIZE_FIRST_SAMPLE = False
-REDUNDANCY_FACTOR = 1 # Keep this at 1
+MAX_SAMPLES_PER_CLASS = 1000 
+REDUNDANCY_FACTOR = 1 
 
 np.random.seed(42)
 
@@ -29,10 +26,8 @@ def load_audio_file(filepath: Path) -> np.ndarray | None:
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            # Load with the global DURATION
             audio, _ = librosa.load(filepath, sr=SAMPLE_RATE, duration=DURATION, mono=True)
         
-        # Pad or truncate to the exact DURATION
         target_length = int(SAMPLE_RATE * DURATION)
         if len(audio) < target_length:
             audio = np.pad(audio, (0, target_length - len(audio)))
@@ -133,16 +128,6 @@ def create_pure_redundancy(spike_train: np.ndarray, redundancy_factor: int) -> n
     redundant = np.repeat(spike_train, redundancy_factor, axis=0)
     return redundant
 
-def visualize_conversion(mel, base_spikes, redundant_spikes, filename, n_filters):
-    """Visualize the conversion with pure redundancy"""
-    # (This function is unchanged, but you can copy it from your old file if needed)
-    pass
-
-def visualize_hysteresis_channel(spectrogram, channel_index, thresholds, hysteresis_gap, filename):
-    """Generates a detailed plot to debug the hysteresis logic for a single channel."""
-    # (This function is unchanged, but you can copy it from your old file if needed)
-    pass
-
 def create_dataset(n_filters: int, filterbank: str):
     """Create dataset from a metadata CSV for sentences."""
     
@@ -227,10 +212,6 @@ def create_dataset(n_filters: int, filterbank: str):
         all_spike_trains.append(redundant_spike_train)
         all_labels.append(label_idx)
 
-        if VISUALIZE_FIRST_SAMPLE and len(all_spike_trains) == 1:
-            visualize_conversion(spectrogram, base_spike_train,
-                               redundant_spike_train, audio_file.name, n_filters)
-
     if not all_spike_trains:
         print("\n" + "="*60)
         print("ERROR: No audio files were successfully processed.")
@@ -303,14 +284,6 @@ if __name__ == "__main__":
                       f"Max channel is {spectrogram.shape[0] - 1}.")
                 sys.exit(1)
 
-            print(f"Visualizing channel {args.debug_channel}...")
-            visualize_hysteresis_channel(
-                spectrogram,
-                args.debug_channel,
-                SPIKE_THRESHOLDS,
-                HYSTERESIS_GAP,
-                audio_file.name
-            )
         else:
             print("Could not load audio file.")
     else:

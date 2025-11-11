@@ -140,7 +140,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--multiplier", 
         type=float, 
-        default=1.0, # You will tune this value
+        default=0.6, # You will tune this value
         help="Multiplier for w_critico (e.g., 0.6 for 60%%)"
     )
     args = parser.parse_args()
