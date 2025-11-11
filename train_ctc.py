@@ -186,9 +186,16 @@ def train():
         f"  Normalized range: [{X_train_normalized.min():.2f}, {X_train_normalized.max():.2f}]"
     )
 
+    # --- Setup Device (GPU/CPU) ---
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"\n🖥️  Using device: {device}")
+    if device.type == "cuda":
+        print(f"   GPU: {torch.cuda.get_device_name(0)}")
+        print(f"   Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
+
     # --- Convert to PyTorch Tensors ---
-    X_train_tensor = torch.FloatTensor(X_train_normalized)
-    X_test_tensor = torch.FloatTensor(X_test_normalized)
+    X_train_tensor = torch.FloatTensor(X_train_normalized).to(device)
+    X_test_tensor = torch.FloatTensor(X_test_normalized).to(device)
 
     # --- Parameters for Model & CTC ---
     # From your lsm_sequences.npz output
@@ -201,7 +208,7 @@ def train():
     print(f"Num Classes (w/ blank): {num_classes}")
 
     # --- Initialize Model, Loss, and Optimizer ---
-    model = CTCReadout(input_features=num_lsm_neurons, num_classes=num_classes)
+    model = CTCReadout(input_features=num_lsm_neurons, num_classes=num_classes).to(device)
 
     # CTCLoss(blank=0) tells the loss function that index 0 is the blank token
     # reduction='mean' averages the loss over the batch
@@ -222,15 +229,15 @@ def train():
 
     # 2. Concatenate all sequences into one long tensor
     # e.g., [2,5,3] and [1,4] becomes [2,5,3,1,4]
-    y_train_targets = torch.cat(y_train_encoded)
+    y_train_targets = torch.cat(y_train_encoded).to(device)
 
     # 3. Create a tensor of the *length* of each text label
     # e.g., [3, 2]
-    y_train_target_lengths = torch.LongTensor([len(seq) for seq in y_train_encoded])
+    y_train_target_lengths = torch.LongTensor([len(seq) for seq in y_train_encoded]).to(device)
 
     # 4. Create a tensor of the *length* of each input sequence
     # For us, they are all the same length (400)
-    X_train_input_lengths = torch.LongTensor([num_timesteps] * num_samples)
+    X_train_input_lengths = torch.LongTensor([num_timesteps] * num_samples).to(device)
 
     # --- The Training Loop ---
     num_epochs = 5000

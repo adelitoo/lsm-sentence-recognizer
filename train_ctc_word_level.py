@@ -147,9 +147,16 @@ def train():
     X_train_normalized = (X_train - feature_mean) / feature_std
     X_test_normalized = (X_test - feature_mean) / feature_std
 
+    # --- Setup Device (GPU/CPU) ---
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"\n🖥️  Using device: {device}")
+    if device.type == "cuda":
+        print(f"   GPU: {torch.cuda.get_device_name(0)}")
+        print(f"   Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
+
     # Convert to tensors
-    X_train_tensor = torch.FloatTensor(X_train_normalized)
-    X_test_tensor = torch.FloatTensor(X_test_normalized)
+    X_train_tensor = torch.FloatTensor(X_train_normalized).to(device)
+    X_test_tensor = torch.FloatTensor(X_test_normalized).to(device)
 
     # Model configuration
     num_samples, num_timesteps, num_features = X_train_tensor.shape
@@ -162,7 +169,7 @@ def train():
     print(f"Num Classes (w/ blank): {num_word_classes}")
 
     # Initialize model
-    model = WordLevelCTCReadout(input_features=num_features, num_word_classes=num_word_classes)
+    model = WordLevelCTCReadout(input_features=num_features, num_word_classes=num_word_classes).to(device)
     loss_fn = nn.CTCLoss(blank=BLANK_TOKEN, reduction='mean', zero_infinity=True)
     optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-5)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
@@ -171,9 +178,9 @@ def train():
 
     # Prepare CTC targets (word-level)
     y_train_encoded = [encode_text_words(text, WORD_MAP) for text in y_train_text]
-    y_train_targets = torch.cat(y_train_encoded)
-    y_train_target_lengths = torch.LongTensor([len(seq) for seq in y_train_encoded])
-    X_train_input_lengths = torch.LongTensor([num_timesteps] * num_samples)
+    y_train_targets = torch.cat(y_train_encoded).to(device)
+    y_train_target_lengths = torch.LongTensor([len(seq) for seq in y_train_encoded]).to(device)
+    X_train_input_lengths = torch.LongTensor([num_timesteps] * num_samples).to(device)
 
     # Training loop
     num_epochs = 5000
