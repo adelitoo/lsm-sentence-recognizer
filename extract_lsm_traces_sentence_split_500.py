@@ -17,12 +17,12 @@ from pathlib import Path
 import argparse
 
 # --- Network Parameters (matching the spike feature version) ---
-NUM_NEURONS = 1000
-NUM_OUTPUT_NEURONS = 400
+NUM_NEURONS = 2000
+NUM_OUTPUT_NEURONS = 700
 LEAK_COEFFICIENT = 0
 REFRACTORY_PERIOD = 2
 MEMBRANE_THRESHOLD = 2.0
-SMALL_WORLD_P = 0.1
+SMALL_WORLD_P = 0.2
 SMALL_WORLD_K = int(0.10 * NUM_NEURONS * 2)
 
 np.random.seed(42)
@@ -159,6 +159,11 @@ def extract_membrane_traces(lsm, spike_sample, output_neurons):
     inputs = spike_sample
     mem = lsm.membrane_potentials
     refr = lsm.refractory_timer
+
+    # CRITICAL FIX: Zero out membrane potentials and refractory timers
+    mem[:] = 0.0
+    refr[:] = 0
+
     out_idx = output_neurons
     leak_factor = np.float32(1.0 - lsm.leak_coefficient)
     curr_amp = np.float32(lsm.current_amplitude)
@@ -300,7 +305,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--multiplier",
         type=float,
-        default=0.8,
+        default=0.7,
         help="Multiplier for w_critico (try 0.7-0.9)"
     )
     args = parser.parse_args()

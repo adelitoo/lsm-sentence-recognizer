@@ -244,3 +244,4 @@ matplotlib
 ```
 
 Install all with: `pip install -r requirements.txt`
+- Stop generating .md files unless asked

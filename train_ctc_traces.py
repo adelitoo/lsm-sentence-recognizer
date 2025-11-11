@@ -18,6 +18,7 @@ import torch.optim as optim
 import torch.nn.functional as F
 from pathlib import Path
 import itertools
+from torch.utils.data import Dataset, DataLoader # <-- ADDED
 
 # --- 1. Define the Character Set (Vocabulary) ---
 BLANK_TOKEN = 0
@@ -65,6 +66,44 @@ def greedy_decoder(log_probs: torch.Tensor) -> str:
             decoded_text += INDEX_MAP[i]
 
     return decoded_text.strip()
+
+
+# --- 1.5. Define Custom Dataset & Collate Function ---
+class TraceDataset(Dataset):
+    """Custom Dataset to handle (trace, encoded_text) pairs."""
+    def __init__(self, x_data, y_encoded_list):
+        self.x_data = x_data
+        self.y_data = y_encoded_list
+    
+    def __len__(self):
+        return len(self.x_data)
+    
+    def __getitem__(self, idx):
+        # Data is still on CPU, which is fine for __getitem__
+        return self.x_data[idx], self.y_data[idx]
+
+def ctc_collate_fn(batch):
+    """
+    Custom collate function to batch variable-length CTC data.
+    batch is a list of tuples: [(x1, y1), (x2, y2), ...]
+    """
+    # --- Process X (Features) ---
+    # Stack all x samples into a single batch tensor
+    x_batch = torch.stack([item[0] for item in batch])
+    
+    # --- Process Y (Targets) ---
+    y_batch_list = [item[1] for item in batch]
+    # Concatenate all target sequences into one long tensor
+    y_targets_concat = torch.cat(y_batch_list)
+    # Create a tensor of the length of each target sequence
+    y_target_lengths = torch.LongTensor([len(seq) for seq in y_batch_list])
+    
+    # --- Get Input Lengths ---
+    # All our inputs have the same number of timesteps
+    num_timesteps = x_batch.shape[1]
+    input_lengths = torch.LongTensor([num_timesteps] * len(batch))
+    
+    return x_batch, y_targets_concat, input_lengths, y_target_lengths
 
 
 # --- 2. Define the PyTorch Readout Model ---
@@ -117,25 +156,25 @@ def train():
         return
 
     print(f"✅ Loading MEMBRANE POTENTIAL TRACES from '{trace_file}'")
-    print(f"   🎯 Testing TRUE GENERALIZATION to unseen sentences!")
-    dataset = np.load(trace_file, allow_pickle=True)    
+    print(f"    🎯 Testing TRUE GENERALIZATION to unseen sentences!")
+    dataset = np.load(trace_file, allow_pickle=True)
 
     X_train = dataset["X_train_sequences"]
-    y_train_indices = dataset["y_train"]
+    y_train = dataset["y_train"]
     X_test = dataset["X_test_sequences"]
-    y_test_indices = dataset["y_test"]
+    y_test = dataset["y_test"]
 
     label_map = load_label_map()
     if label_map is None:
         return
 
     # Get the text for each label index
-    y_train_text = [label_map[idx] for idx in y_train_indices]
-    y_test_text = [label_map[idx] for idx in y_test_indices]
+    y_train_text = [label_map[idx] for idx in y_train]
+    y_test_text = [label_map[idx] for idx in y_test]
 
     print(f"Training samples: {len(X_train)}")
     print(f"Test samples: {len(X_test)}")
-    print(f"Sample train label 0: {y_train_indices[0]} -> '{y_train_text[0]}'")
+    print(f"Sample train label 0: {y_train[0]} -> '{y_train_text[0]}'")
 
     # --- Visualize the first training sample ---
     print("\nVisualizing the first training sample (membrane potentials)...")
@@ -177,12 +216,12 @@ def train():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"\n🖥️  Using device: {device}")
     if device.type == "cuda":
-        print(f"   GPU: {torch.cuda.get_device_name(0)}")
-        print(f"   Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
+        print(f"    GPU: {torch.cuda.get_device_name(0)}")
+        print(f"    Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
 
-    # --- Convert to PyTorch Tensors ---
-    X_train_tensor = torch.FloatTensor(X_train_normalized).to(device)
-    X_test_tensor = torch.FloatTensor(X_test_normalized).to(device)
+    # --- Convert to PyTorch Tensors (Keep on CPU for DataLoader) ---
+    X_train_tensor = torch.FloatTensor(X_train_normalized)
+    X_test_tensor = torch.FloatTensor(X_test_normalized)
 
     # --- Parameters for Model & CTC ---
     num_samples, num_timesteps, num_membrane_channels = X_train_tensor.shape
@@ -195,6 +234,7 @@ def train():
     print(f"Data type: Continuous membrane voltages (not spike features)")
 
     # --- Initialize Model, Loss, and Optimizer ---
+    # Move model to GPU
     model = CTCReadout(input_features=num_membrane_channels, num_classes=num_classes).to(device)
 
     loss_fn = nn.CTCLoss(blank=BLANK_TOKEN, reduction="mean", zero_infinity=True)
@@ -204,66 +244,94 @@ def train():
         optimizer, mode="min", factor=0.5, patience=200, min_lr=1e-7
     )
 
-    # --- Prepare CTC Targets ---
+    # --- Prepare DataLoader (Replaces old CTC target prep) ---
+    BATCH_SIZE = 16  # You can tune this (e.g., 8, 16, 32)
     y_train_encoded = [encode_text(text) for text in y_train_text]
-    y_train_targets = torch.cat(y_train_encoded).to(device)
-    y_train_target_lengths = torch.LongTensor([len(seq) for seq in y_train_encoded]).to(device)
-    X_train_input_lengths = torch.LongTensor([num_timesteps] * num_samples).to(device)
 
-    # --- The Training Loop ---
+    train_dataset = TraceDataset(X_train_tensor, y_train_encoded)
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=BATCH_SIZE,
+        shuffle=True,
+        collate_fn=ctc_collate_fn,
+        num_workers=2,  # Speeds up data loading
+        pin_memory=True # Helps speed up CPU to GPU transfer
+    )
+
+
+    # --- The Training Loop (MODIFIED FOR BATCHING) ---
     num_epochs = 5000
-    print(f"\nStarting training for {num_epochs} epochs...")
+    print(f"\nStarting training for {num_epochs} epochs... (Batch Size: {BATCH_SIZE})")
 
     best_loss = float("inf")
 
     for epoch in range(num_epochs):
         model.train()  # Set model to training mode
-        optimizer.zero_grad()  # Reset gradients
+        epoch_loss = 0.0
 
-        # --- Forward Pass ---
-        log_probs = model(X_train_tensor)
+        # --- Batch Loop ---
+        for X_batch, y_targets, X_input_lengths, y_target_lengths in train_loader:
+            
+            # Move current batch to GPU
+            X_batch = X_batch.to(device)
+            y_targets = y_targets.to(device)
+            X_input_lengths = X_input_lengths.to(device)
+            y_target_lengths = y_target_lengths.to(device)
 
-        # --- Prepare for CTCLoss ---
-        # CTCLoss expects (Time_Steps, Batch_Size, Num_Classes)
-        log_probs_for_loss = log_probs.permute(1, 0, 2)
+            optimizer.zero_grad()  # Reset gradients for this batch
 
-        # --- Calculate Loss ---
-        loss = loss_fn(
-            log_probs_for_loss,
-            y_train_targets,
-            X_train_input_lengths,
-            y_train_target_lengths,
-        )
+            # --- Forward Pass (on the batch) ---
+            log_probs = model(X_batch)
 
-        # --- Backward Pass ---
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-        optimizer.step()
+            # --- Prepare for CTCLoss ---
+            # CTCLoss expects (Time_Steps, Batch_Size, Num_Classes)
+            log_probs_for_loss = log_probs.permute(1, 0, 2)
 
-        # Update learning rate based on loss
-        scheduler.step(loss)
+            # --- Calculate Loss ---
+            loss = loss_fn(
+                log_probs_for_loss,
+                y_targets,
+                X_input_lengths,
+                y_target_lengths,
+            )
+
+            # --- Backward Pass ---
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            optimizer.step()
+            
+            epoch_loss += loss.item()
+        
+        # --- End of Epoch ---
+        avg_epoch_loss = epoch_loss / len(train_loader)
+        
+        # Update learning rate based on average epoch loss
+        scheduler.step(avg_epoch_loss)
 
         # Track best loss
-        if loss.item() < best_loss:
-            best_loss = loss.item()
+        if avg_epoch_loss < best_loss:
+            best_loss = avg_epoch_loss
 
         # --- Print Progress ---
         if (epoch + 1) % 20 == 0:
             current_lr = optimizer.param_groups[0]["lr"]
             print(
-                f"Epoch {epoch + 1}/{num_epochs}, Loss: {loss.item():.4f}, Best: {best_loss:.4f}, LR: {current_lr:.6f}"
+                f"Epoch {epoch + 1}/{num_epochs}, Loss: {avg_epoch_loss:.4f}, Best: {best_loss:.4f}, LR: {current_lr:.6f}"
             )
 
             # --- Check a prediction (Greedy Decode) ---
             model.eval()  # Set model to evaluation mode
             with torch.no_grad():
                 # Get prediction for the first test sample
-                test_sample_log_probs = model(X_test_tensor[0].unsqueeze(0))
+                # Move ONE sample to the GPU for this test
+                test_sample = X_test_tensor[0].unsqueeze(0).to(device)
+                test_sample_log_probs = model(test_sample)
 
                 # Squeeze to (Time_Steps, Num_Classes)
                 test_sample_log_probs = test_sample_log_probs.squeeze(0)
 
-                decoded_text = greedy_decoder(test_sample_log_probs)
+                # Greedy decoder works on CPU
+                decoded_text = greedy_decoder(test_sample_log_probs.cpu())
 
                 print(f"  Test Sample 0 Target: '{y_test_text[0]}'")
                 print(f"  Test Sample 0 Decoded: '{decoded_text}'\n")
@@ -272,6 +340,7 @@ def train():
 
     # Save the trained model
     model_path = "ctc_model_traces.pt"
+    # Save model state dict (move to CPU first)
     torch.save(model.state_dict(), model_path)
     print(f"✅ Model saved to '{model_path}'")
 
@@ -286,9 +355,14 @@ def train():
 
     with torch.no_grad():
         for i in range(total):
-            test_sample_log_probs = model(X_test_tensor[i].unsqueeze(0))
+            # Move ONE sample at a time to the GPU
+            test_sample = X_test_tensor[i].unsqueeze(0).to(device)
+            test_sample_log_probs = model(test_sample)
+            
             test_sample_log_probs = test_sample_log_probs.squeeze(0)
-            decoded_text = greedy_decoder(test_sample_log_probs)
+            
+            # Decode on CPU
+            decoded_text = greedy_decoder(test_sample_log_probs.cpu())
 
             if decoded_text == y_test_text[i]:
                 correct += 1
