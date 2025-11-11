@@ -99,13 +99,22 @@ def train():
 
     # --- Load Data ---
     print("Loading data...")
-    # Try to load features in order of preference: filtered > windowed > traces
+    # Try to load features in order of preference: sentence_split > filtered > windowed > traces
+    sentence_split_file = "lsm_windowed_features_filtered_sentence_split.npz"
     filtered_file = "lsm_windowed_features_filtered.npz"
     feature_file = "lsm_windowed_features.npz"
     trace_file = "lsm_trace_sequences.npz"
 
-    if Path(filtered_file).exists():
+    split_type = "sample-level"  # Default
+
+    if Path(sentence_split_file).exists():
+        print(f"✅ Loading SENTENCE-LEVEL SPLIT features from '{sentence_split_file}'")
+        print(f"   🎯 Testing TRUE GENERALIZATION to unseen sentences!")
+        dataset = np.load(sentence_split_file)
+        split_type = "sentence-level"
+    elif Path(filtered_file).exists():
         print(f"✅ Loading FILTERED windowed features from '{filtered_file}'")
+        print(f"   (Sample-level split - tests robustness to audio variations)")
         dataset = np.load(filtered_file)
     elif Path(feature_file).exists():
         print(f"✅ Loading windowed features from '{feature_file}'")
@@ -157,6 +166,10 @@ def train():
     feature_mean = X_train_flat.mean(axis=0)
     feature_std = X_train_flat.std(axis=0) + 1e-8  # Add epsilon to avoid division by zero
 
+    # Reshape for proper broadcasting with 3D arrays (batch, time, features)
+    feature_mean = feature_mean.reshape(1, 1, -1)
+    feature_std = feature_std.reshape(1, 1, -1)
+
     # Normalize
     X_train_normalized = (X_train - feature_mean) / feature_std
     X_test_normalized = (X_test - feature_mean) / feature_std
@@ -189,7 +202,7 @@ def train():
     # Lower initial LR for larger model with more parameters
     optimizer = optim.Adam(model.parameters(), lr=0.0005, weight_decay=1e-5)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', factor=0.5, patience=100
+        optimizer, mode='min', factor=0.5, patience=200, min_lr=1e-7
     )
 
     # --- Prepare CTC Targets ---
@@ -271,6 +284,54 @@ def train():
                 print(f"  Test Sample 0 Decoded: '{decoded_text}'\n")
 
     print("✅ Training complete.")
+
+    # Save the trained model (with split type in filename)
+    if split_type == "sentence-level":
+        model_path = "ctc_model_sentence_split.pt"
+    else:
+        model_path = "ctc_model.pt"
+
+    torch.save(model.state_dict(), model_path)
+    print(f"✅ Model saved to '{model_path}' ({split_type} split)")
+
+    # Evaluate on all test samples
+    print("\n" + "="*60)
+    print("FINAL EVALUATION ON ALL TEST SAMPLES")
+    print("="*60)
+
+    model.eval()
+    correct = 0
+    total = len(X_test_tensor)
+
+    # Prepare test targets
+    y_test_encoded = [encode_text(text) for text in y_test_text]
+
+    with torch.no_grad():
+        for i in range(total):
+            test_sample_log_probs = model(X_test_tensor[i].unsqueeze(0))
+            test_sample_log_probs = test_sample_log_probs.squeeze(0)
+            decoded_text = greedy_decoder(test_sample_log_probs)
+
+            if decoded_text == y_test_text[i]:
+                correct += 1
+
+            # Show first 5 and last 5 examples
+            if i < 5 or i >= total - 5:
+                match_symbol = "✅" if decoded_text == y_test_text[i] else "❌"
+                print(f"{match_symbol} Sample {i}:")
+                print(f"  Target:     '{y_test_text[i]}'")
+                print(f"  Prediction: '{decoded_text}'")
+
+    accuracy = (correct / total) * 100
+    print(f"\n{'='*60}")
+    print(f"Test Set Accuracy: {correct}/{total} = {accuracy:.2f}%")
+    print(f"Split Type: {split_type.upper()}")
+    if split_type == "sentence-level":
+        print(f"🎯 This tests GENERALIZATION to completely unseen sentences!")
+    else:
+        print(f"   This tests ROBUSTNESS to audio variations")
+    print(f"{'='*60}")
+    print("\nFor detailed metrics (CER, WER), run: python evaluate_model.py")
 
 if __name__ == "__main__":
     train()
