@@ -173,9 +173,16 @@ def train():
         f"  Normalized range: [{X_train_normalized.min():.3f}, {X_train_normalized.max():.3f}]"
     )
 
+    # --- Setup Device (GPU/CPU) ---
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"\n🖥️  Using device: {device}")
+    if device.type == "cuda":
+        print(f"   GPU: {torch.cuda.get_device_name(0)}")
+        print(f"   Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
+
     # --- Convert to PyTorch Tensors ---
-    X_train_tensor = torch.FloatTensor(X_train_normalized)
-    X_test_tensor = torch.FloatTensor(X_test_normalized)
+    X_train_tensor = torch.FloatTensor(X_train_normalized).to(device)
+    X_test_tensor = torch.FloatTensor(X_test_normalized).to(device)
 
     # --- Parameters for Model & CTC ---
     num_samples, num_timesteps, num_membrane_channels = X_train_tensor.shape
@@ -188,7 +195,7 @@ def train():
     print(f"Data type: Continuous membrane voltages (not spike features)")
 
     # --- Initialize Model, Loss, and Optimizer ---
-    model = CTCReadout(input_features=num_membrane_channels, num_classes=num_classes)
+    model = CTCReadout(input_features=num_membrane_channels, num_classes=num_classes).to(device)
 
     loss_fn = nn.CTCLoss(blank=BLANK_TOKEN, reduction="mean", zero_infinity=True)
 
@@ -199,9 +206,9 @@ def train():
 
     # --- Prepare CTC Targets ---
     y_train_encoded = [encode_text(text) for text in y_train_text]
-    y_train_targets = torch.cat(y_train_encoded)
-    y_train_target_lengths = torch.LongTensor([len(seq) for seq in y_train_encoded])
-    X_train_input_lengths = torch.LongTensor([num_timesteps] * num_samples)
+    y_train_targets = torch.cat(y_train_encoded).to(device)
+    y_train_target_lengths = torch.LongTensor([len(seq) for seq in y_train_encoded]).to(device)
+    X_train_input_lengths = torch.LongTensor([num_timesteps] * num_samples).to(device)
 
     # --- The Training Loop ---
     num_epochs = 5000
