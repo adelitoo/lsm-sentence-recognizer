@@ -4,7 +4,7 @@ CTC Training on Membrane Potential Traces (500 Sentences)
 This version trains on CONTINUOUS MEMBRANE VOLTAGES instead of windowed spike features.
 
 Key differences from regular CTC training:
-- Loads lsm_trace_sequences_sentence_split_500.npz (membrane potentials)
+- Loads lsm_trace_sequences.npz (membrane potentials)
 - Input: (samples, 2000 timesteps, 700 neurons) continuous voltages
 - No windowing - full temporal resolution
 - Tests true generalization to unseen sentences
@@ -28,7 +28,7 @@ INDEX_MAP = {i + 1: char for i, char in enumerate(CHAR_LIST)}
 INDEX_MAP[BLANK_TOKEN] = "<b>"  # Representation for "blank"
 
 
-def load_label_map(filepath="sentence_label_map_500.txt"):
+def load_label_map(filepath="sentence_label_map.txt"):
     """Loads the 'sentence_label_map.txt' file into a dictionary."""
     if not Path(filepath).exists():
         print(f"❌ Error: Label map not found at '{filepath}'")
@@ -66,6 +66,35 @@ def greedy_decoder(log_probs: torch.Tensor) -> str:
             decoded_text += INDEX_MAP[i]
 
     return decoded_text.strip()
+
+
+def char_error_rate(predicted: str, target: str) -> float:
+    """Calculate Character Error Rate (CER) - Levenshtein distance normalized by target length"""
+    if len(target) == 0:
+        return 1.0 if len(predicted) > 0 else 0.0
+
+    # Simple Levenshtein distance implementation
+    m, n = len(predicted), len(target)
+    dp = [[0] * (n + 1) for _ in range(m + 1)]
+
+    for i in range(m + 1):
+        dp[i][0] = i
+    for j in range(n + 1):
+        dp[0][j] = j
+
+    for i in range(1, m + 1):
+        for j in range(1, n + 1):
+            if predicted[i-1] == target[j-1]:
+                dp[i][j] = dp[i-1][j-1]
+            else:
+                dp[i][j] = 1 + min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1])
+
+    return dp[m][n] / len(target)
+
+
+def char_accuracy(predicted: str, target: str) -> float:
+    """Calculate Character-level Accuracy (1 - CER)"""
+    return max(0.0, 1.0 - char_error_rate(predicted, target))
 
 
 # --- 1.5. Define Custom Dataset & Collate Function ---
@@ -148,7 +177,7 @@ def train():
 
     # --- Load Trace Data ---
     print("\nLoading trace data...")
-    trace_file = "lsm_trace_sequences_sentence_split_500.npz"
+    trace_file = "lsm_trace_sequences.npz"
 
     if not Path(trace_file).exists():
         print(f"❌ Error: Trace file not found at '{trace_file}'")
@@ -241,7 +270,7 @@ def train():
 
     optimizer = optim.Adam(model.parameters(), lr=0.0005, weight_decay=1e-5)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="min", factor=0.5, patience=200, min_lr=1e-7
+        optimizer, mode="min", factor=0.5, patience=50, min_lr=1e-7, verbose=True
     )
 
     # --- Prepare DataLoader (Replaces old CTC target prep) ---
@@ -264,6 +293,10 @@ def train():
     print(f"\nStarting training for {num_epochs} epochs... (Batch Size: {BATCH_SIZE})")
 
     best_loss = float("inf")
+    best_char_acc = 0.0
+    patience = 100  # Early stopping patience
+    patience_counter = 0
+    best_model_state = None
 
     for epoch in range(num_epochs):
         model.train()  # Set model to training mode
@@ -271,7 +304,7 @@ def train():
 
         # --- Batch Loop ---
         for X_batch, y_targets, X_input_lengths, y_target_lengths in train_loader:
-            
+
             # Move current batch to GPU
             X_batch = X_batch.to(device)
             y_targets = y_targets.to(device)
@@ -299,42 +332,75 @@ def train():
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
-            
+
             epoch_loss += loss.item()
-        
+
         # --- End of Epoch ---
         avg_epoch_loss = epoch_loss / len(train_loader)
-        
+
         # Update learning rate based on average epoch loss
         scheduler.step(avg_epoch_loss)
 
-        # Track best loss
+        # Track best loss and save best model
         if avg_epoch_loss < best_loss:
             best_loss = avg_epoch_loss
+            best_model_state = model.state_dict()
+            patience_counter = 0
+        else:
+            patience_counter += 1
 
-        # --- Print Progress ---
+        # --- Print Progress and Evaluate ---
         if (epoch + 1) % 20 == 0:
             current_lr = optimizer.param_groups[0]["lr"]
-            print(
-                f"Epoch {epoch + 1}/{num_epochs}, Loss: {avg_epoch_loss:.4f}, Best: {best_loss:.4f}, LR: {current_lr:.6f}"
-            )
 
-            # --- Check a prediction (Greedy Decode) ---
+            # --- Check predictions on test set (Greedy Decode) ---
             model.eval()  # Set model to evaluation mode
             with torch.no_grad():
-                # Get prediction for the first test sample
-                # Move ONE sample to the GPU for this test
+                # Evaluate on first 5 test samples for detailed metrics
+                total_cer = 0.0
+                total_char_acc = 0.0
+
+                for i in range(min(5, len(X_test_tensor))):
+                    test_sample = X_test_tensor[i].unsqueeze(0).to(device)
+                    test_sample_log_probs = model(test_sample)
+                    test_sample_log_probs = test_sample_log_probs.squeeze(0)
+                    decoded_text = greedy_decoder(test_sample_log_probs.cpu())
+
+                    cer = char_error_rate(decoded_text, y_test_text[i])
+                    acc = char_accuracy(decoded_text, y_test_text[i])
+                    total_cer += cer
+                    total_char_acc += acc
+
+                avg_cer = total_cer / min(5, len(X_test_tensor))
+                avg_char_acc = total_char_acc / min(5, len(X_test_tensor))
+
+                # Track best character accuracy
+                if avg_char_acc > best_char_acc:
+                    best_char_acc = avg_char_acc
+
+                print(
+                    f"Epoch {epoch + 1}/{num_epochs}, Loss: {avg_epoch_loss:.4f}, Best Loss: {best_loss:.4f}, LR: {current_lr:.6f}"
+                )
+                print(f"  Char Acc: {avg_char_acc*100:.1f}%, CER: {avg_cer*100:.1f}%, Best Char Acc: {best_char_acc*100:.1f}%")
+
+                # Show first test sample prediction
                 test_sample = X_test_tensor[0].unsqueeze(0).to(device)
                 test_sample_log_probs = model(test_sample)
-
-                # Squeeze to (Time_Steps, Num_Classes)
                 test_sample_log_probs = test_sample_log_probs.squeeze(0)
-
-                # Greedy decoder works on CPU
                 decoded_text = greedy_decoder(test_sample_log_probs.cpu())
 
-                print(f"  Test Sample 0 Target: '{y_test_text[0]}'")
-                print(f"  Test Sample 0 Decoded: '{decoded_text}'\n")
+                print(f"  Sample 0 Target:  '{y_test_text[0]}'")
+                print(f"  Sample 0 Decoded: '{decoded_text}'\n")
+
+            # Early stopping check
+            if patience_counter >= patience:
+                print(f"\n⏹️  Early stopping triggered after {epoch + 1} epochs (no improvement for {patience} epochs)")
+                print(f"   Best loss: {best_loss:.4f}, Best char accuracy: {best_char_acc*100:.1f}%")
+                # Restore best model
+                if best_model_state is not None:
+                    model.load_state_dict(best_model_state)
+                    print(f"   ✅ Restored best model from earlier epoch")
+                break
 
     print("✅ Training complete.")
 
@@ -352,20 +418,29 @@ def train():
     model.eval()
     correct = 0
     total = len(X_test_tensor)
+    total_cer = 0.0
+    total_char_acc = 0.0
 
     with torch.no_grad():
         for i in range(total):
             # Move ONE sample at a time to the GPU
             test_sample = X_test_tensor[i].unsqueeze(0).to(device)
             test_sample_log_probs = model(test_sample)
-            
+
             test_sample_log_probs = test_sample_log_probs.squeeze(0)
-            
+
             # Decode on CPU
             decoded_text = greedy_decoder(test_sample_log_probs.cpu())
 
+            # Word-level accuracy
             if decoded_text == y_test_text[i]:
                 correct += 1
+
+            # Character-level metrics
+            cer = char_error_rate(decoded_text, y_test_text[i])
+            acc = char_accuracy(decoded_text, y_test_text[i])
+            total_cer += cer
+            total_char_acc += acc
 
             # Show first 5 and last 5 examples
             if i < 5 or i >= total - 5:
@@ -373,11 +448,18 @@ def train():
                 print(f"{match_symbol} Sample {i}:")
                 print(f"  Target:     '{y_test_text[i]}'")
                 print(f"  Prediction: '{decoded_text}'")
+                print(f"  Char Acc:   {acc*100:.1f}%, CER: {cer*100:.1f}%")
 
-    accuracy = (correct / total) * 100
+    word_accuracy = (correct / total) * 100
+    avg_char_acc = (total_char_acc / total) * 100
+    avg_cer = (total_cer / total) * 100
+
     print(f"\n{'=' * 60}")
-    print(f"Test Set Accuracy: {correct}/{total} = {accuracy:.2f}%")
-    print(f"Split Type: SENTENCE-LEVEL (membrane potential traces)")
+    print(f"ACCURACY METRICS:")
+    print(f"  Word-level Accuracy: {correct}/{total} = {word_accuracy:.2f}%")
+    print(f"  Character Accuracy:  {avg_char_acc:.2f}%")
+    print(f"  Character Error Rate (CER): {avg_cer:.2f}%")
+    print(f"\nSplit Type: SENTENCE-LEVEL (membrane potential traces)")
     print(f"🎯 This tests GENERALIZATION to completely unseen sentences!")
     print(f"Data type: Continuous membrane voltages (not windowed spike features)")
     print(f"{'=' * 60}")

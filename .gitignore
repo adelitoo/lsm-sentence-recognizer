@@ -208,22 +208,17 @@ __marimo__/
 
 # ===== DATASET FILES =====
 
-# Old dataset files (not used)
+# Audio files (regenerate with generate_sentences.py)
 sentences/
-sentence_label_map.txt
+
+# Intermediate data files (regenerate with pipeline)
 sentence_spike_trains.npz
 lsm_trace_sequences.npz
+lsm_windowed_features.npz
 
-# 500-sentence dataset: intermediate files (can regenerate)
-sentences_500/                    # Audio files (66 MB) - regenerate with generate_500_sentences.py
-sentence_spike_trains_500.npz    # Spike trains (980 KB) - regenerate with audio_encoding_500.py
-lsm_trace_sequences_sentence_split_100.npz  # Old 100-sentence traces (269 MB)
-
-# Essential files for GPU training (KEEP THESE)
-!sentence_label_map_500.txt                                     # Labels (16 KB)
-!balanced_sentence_split_500.npz                                # Train/test split
-!lsm_trace_sequences_sentence_split_500.npz                     # Membrane traces for trace-based training (645 MB)
-!lsm_windowed_features_filtered_sentence_split_500.npz          # Windowed features for char/word training (9 MB)
+# Essential files for training (KEEP THESE)
+!sentence_label_map.txt          # Labels (small)
+!balanced_sentence_split.npz     # Train/test split (small)
 
 # ===== MODEL & OUTPUTS =====
 

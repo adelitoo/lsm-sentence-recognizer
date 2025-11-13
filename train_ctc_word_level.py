@@ -11,7 +11,7 @@ from collections import Counter
 # --- 1. Build Word Vocabulary ---
 BLANK_TOKEN = 0
 
-def build_word_vocabulary(label_map_file="sentence_label_map_500.txt"):
+def build_word_vocabulary(label_map_file="sentence_label_map.txt"):
     """Build word vocabulary from sentences"""
     with open(label_map_file) as f:
         next(f)  # skip header
@@ -33,7 +33,7 @@ def build_word_vocabulary(label_map_file="sentence_label_map_500.txt"):
     return WORD_MAP, INDEX_MAP, vocab_words
 
 
-def load_label_map(filepath="sentence_label_map_500.txt"):
+def load_label_map(filepath="sentence_label_map.txt"):
     """Loads the sentence label map"""
     if not Path(filepath).exists():
         print(f"❌ Error: Label map not found at '{filepath}'")
@@ -108,7 +108,7 @@ def train():
 
     # Load data
     print("\nLoading data...")
-    sentence_split_file = "lsm_windowed_features_filtered_sentence_split_500.npz"
+    sentence_split_file = "lsm_windowed_features.npz"
 
     if not Path(sentence_split_file).exists():
         print(f"❌ Error: Features not found at '{sentence_split_file}'")
