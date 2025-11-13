@@ -26,7 +26,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 # --- Network Parameters (matching the spike feature version) ---
 NUM_NEURONS = 1000
 NUM_OUTPUT_NEURONS = 400
-LEAK_COEFFICIENT = 0.1
+LEAK_COEFFICIENT = 0
 REFRACTORY_PERIOD = 2
 MEMBRANE_THRESHOLD = 2.0
 SMALL_WORLD_P = 0.1
@@ -419,7 +419,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--multiplier",
         type=float,
-        default=0.7,
+        default=1.0,
         help="Multiplier for w_critico (try 0.7-0.9)"
     )
     args = parser.parse_args()
