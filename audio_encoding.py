@@ -21,6 +21,12 @@ HYSTERESIS_GAP = 0.1
 VISUALIZE_FIRST_SAMPLE = False
 REDUNDANCY_FACTOR = 1 # Keep this at 1
 
+# --- AUGMENTATION SETTINGS ---
+NUM_AUGMENTATIONS = 5  # Number of augmented versions per audio sample
+TIME_SHIFT_MS = 5.0  # Time shift range in milliseconds
+NOISE_SNR_DB = 25.0  # Signal-to-noise ratio for additive noise
+PITCH_SHIFT_SEMITONES = 1  # Pitch shift range in semitones
+
 np.random.seed(42)
 
 def load_audio_file(filepath: Path) -> np.ndarray | None:
@@ -41,6 +47,163 @@ def load_audio_file(filepath: Path) -> np.ndarray | None:
     except Exception as e:
         print(f"Error loading {filepath}: {e}")
         return None
+
+
+def augment_time_shift(audio: np.ndarray, shift_ms: float) -> np.ndarray:
+    """
+    Apply time shift (circular roll) to audio.
+
+    Args:
+        audio: Input audio signal
+        shift_ms: Shift amount in milliseconds (can be positive or negative)
+
+    Returns:
+        Time-shifted audio
+    """
+    shift_samples = int(shift_ms * SAMPLE_RATE / 1000.0)
+    return np.roll(audio, shift_samples)
+
+
+def augment_add_noise(audio: np.ndarray, snr_db: float) -> np.ndarray:
+    """
+    Add Gaussian noise at specified SNR.
+
+    Args:
+        audio: Input audio signal
+        snr_db: Signal-to-noise ratio in decibels
+
+    Returns:
+        Audio with added noise
+    """
+    # Calculate signal power
+    signal_power = np.mean(audio ** 2)
+
+    # Calculate noise power from SNR
+    snr_linear = 10 ** (snr_db / 10.0)
+    noise_power = signal_power / snr_linear
+
+    # Generate noise
+    noise = np.random.normal(0, np.sqrt(noise_power), len(audio))
+
+    return audio + noise
+
+
+def augment_pitch_shift(audio: np.ndarray, n_steps: float) -> np.ndarray:
+    """
+    Shift pitch by n_steps semitones.
+
+    Args:
+        audio: Input audio signal
+        n_steps: Number of semitones to shift (can be fractional)
+
+    Returns:
+        Pitch-shifted audio
+    """
+    try:
+        return librosa.effects.pitch_shift(audio, sr=SAMPLE_RATE, n_steps=n_steps)
+    except Exception as e:
+        print(f"Warning: Pitch shift failed, returning original: {e}")
+        return audio
+
+
+def augment_time_stretch(audio: np.ndarray, rate: float) -> np.ndarray:
+    """
+    Time stretch audio by given rate.
+
+    Args:
+        audio: Input audio signal
+        rate: Stretch factor (>1 speeds up, <1 slows down)
+
+    Returns:
+        Time-stretched audio (padded/truncated to original length)
+    """
+    try:
+        stretched = librosa.effects.time_stretch(audio, rate=rate)
+
+        # Ensure same length as input
+        target_length = len(audio)
+        if len(stretched) < target_length:
+            stretched = np.pad(stretched, (0, target_length - len(stretched)))
+        else:
+            stretched = stretched[:target_length]
+
+        return stretched
+    except Exception as e:
+        print(f"Warning: Time stretch failed, returning original: {e}")
+        return audio
+
+
+def create_augmented_versions(audio: np.ndarray, num_augmentations: int = NUM_AUGMENTATIONS) -> list[np.ndarray]:
+    """
+    Create multiple augmented versions of an audio sample.
+
+    Strategy:
+        1. Original (no augmentation)
+        2. Time shift (+5ms)
+        3. Time shift (-5ms)
+        4. Additive noise (SNR=25dB)
+        5. Pitch shift (+1 semitone)
+        6. Time stretch (rate=0.95, slower)
+        7. Combined: time shift + noise
+        8. Combined: pitch shift + noise
+
+    Args:
+        audio: Original audio signal
+        num_augmentations: Total number of versions to create (including original)
+
+    Returns:
+        List of augmented audio arrays
+    """
+    augmented_list = []
+
+    # 1. Original
+    augmented_list.append(audio.copy())
+
+    if num_augmentations < 2:
+        return augmented_list
+
+    # 2. Time shift forward
+    augmented_list.append(augment_time_shift(audio, TIME_SHIFT_MS))
+
+    if num_augmentations < 3:
+        return augmented_list
+
+    # 3. Time shift backward
+    augmented_list.append(augment_time_shift(audio, -TIME_SHIFT_MS))
+
+    if num_augmentations < 4:
+        return augmented_list
+
+    # 4. Add noise
+    augmented_list.append(augment_add_noise(audio, NOISE_SNR_DB))
+
+    if num_augmentations < 5:
+        return augmented_list
+
+    # 5. Pitch shift up
+    augmented_list.append(augment_pitch_shift(audio, PITCH_SHIFT_SEMITONES))
+
+    if num_augmentations < 6:
+        return augmented_list
+
+    # 6. Time stretch
+    augmented_list.append(augment_time_stretch(audio, 0.95))
+
+    if num_augmentations < 7:
+        return augmented_list
+
+    # 7. Combined: time shift + noise
+    temp = augment_time_shift(audio, TIME_SHIFT_MS / 2)
+    augmented_list.append(augment_add_noise(temp, NOISE_SNR_DB + 3))
+
+    if num_augmentations < 8:
+        return augmented_list
+
+    # 8. Combined: pitch shift + noise
+    temp = augment_pitch_shift(audio, -PITCH_SHIFT_SEMITONES)
+    augmented_list.append(augment_add_noise(temp, NOISE_SNR_DB + 3))
+
+    return augmented_list[:num_augmentations]
 
 def audio_to_mel_spectrogram(audio: np.ndarray, n_mels: int) -> np.ndarray:
     """Convert audio to mel spectrogram"""
@@ -177,6 +340,12 @@ def create_dataset(n_filters: int, filterbank: str):
     print(f"  Redundancy factor: {REDUNDANCY_FACTOR}x")
     print(f"  Input neurons per sample: {n_filters * REDUNDANCY_FACTOR}")
     print(f"  Encoding: Hysteresis (Gap: {HYSTERESIS_GAP})")
+    print(f"  ")
+    print(f"  🎲 DATA AUGMENTATION ENABLED:")
+    print(f"     Augmentations per sample: {NUM_AUGMENTATIONS}")
+    print(f"     Expected total samples: {len(metadata)} × {NUM_AUGMENTATIONS} = {len(metadata) * NUM_AUGMENTATIONS}")
+    print(f"     Techniques: time shift (±{TIME_SHIFT_MS}ms), noise (SNR={NOISE_SNR_DB}dB),")
+    print(f"                 pitch shift (±{PITCH_SHIFT_SEMITONES} semitones), time stretch")
     print("="*60 + "\n")
 
     # --- Process Files from CSV ---
@@ -196,23 +365,28 @@ def create_dataset(n_filters: int, filterbank: str):
         if audio_data is None:
             continue
 
-        if filterbank == 'mel':
-            spectrogram = audio_to_mel_spectrogram(audio_data, n_filters)
-        else:
-            spectrogram = audio_to_gammatone_spectrogram(audio_data, n_filters)
+        # Create augmented versions of the audio
+        augmented_audios = create_augmented_versions(audio_data, NUM_AUGMENTATIONS)
 
-        base_spike_train = convert_mels_to_spikes_hysteresis(
-            spectrogram,
-            SPIKE_THRESHOLDS,
-            HYSTERESIS_GAP
-        )
+        # Process each augmented version
+        for aug_audio in augmented_audios:
+            if filterbank == 'mel':
+                spectrogram = audio_to_mel_spectrogram(aug_audio, n_filters)
+            else:
+                spectrogram = audio_to_gammatone_spectrogram(aug_audio, n_filters)
 
-        redundant_spike_train = create_pure_redundancy(base_spike_train, REDUNDANCY_FACTOR)
+            base_spike_train = convert_mels_to_spikes_hysteresis(
+                spectrogram,
+                SPIKE_THRESHOLDS,
+                HYSTERESIS_GAP
+            )
 
-        num_spikes = np.sum(redundant_spike_train)
-        all_spike_counts.append(num_spikes)
-        all_spike_trains.append(redundant_spike_train)
-        all_labels.append(label_idx)
+            redundant_spike_train = create_pure_redundancy(base_spike_train, REDUNDANCY_FACTOR)
+
+            num_spikes = np.sum(redundant_spike_train)
+            all_spike_counts.append(num_spikes)
+            all_spike_trains.append(redundant_spike_train)
+            all_labels.append(label_idx)
 
     if not all_spike_trains:
         print("\n" + "="*60)
@@ -257,6 +431,12 @@ if __name__ == "__main__":
                         help="Number of filters to use in the filterbank (default: 128).")
     parser.add_argument("--filterbank", type=str, default="gammatone", choices=["mel", "gammatone"],
                         help="Type of filterbank to use (default: gammatone).")
+    parser.add_argument("--num-augmentations", type=int, default=5,
+                        help="Number of augmented versions per sample (default: 5, set to 1 to disable).")
 
     args = parser.parse_args()
+
+    # Update global augmentation setting
+    NUM_AUGMENTATIONS = args.num_augmentations
+
     create_dataset(n_filters=args.n_filters, filterbank=args.filterbank)

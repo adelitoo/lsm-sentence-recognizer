@@ -26,10 +26,10 @@ from sklearn.metrics.pairwise import cosine_similarity
 # --- Network Parameters (matching the spike feature version) ---
 NUM_NEURONS = 1000
 NUM_OUTPUT_NEURONS = 400
-LEAK_COEFFICIENT = 0
+LEAK_COEFFICIENT = 0.01
 REFRACTORY_PERIOD = 2
-MEMBRANE_THRESHOLD = 2.0
-SMALL_WORLD_P = 0.1
+MEMBRANE_THRESHOLD = 2
+SMALL_WORLD_P = 0.2
 SMALL_WORLD_K = int(0.10 * NUM_NEURONS * 2)
 
 np.random.seed(42)
@@ -182,7 +182,7 @@ def extract_membrane_traces(lsm, spike_sample, output_neurons):
     mem = lsm.membrane_potentials
     refr = lsm.refractory_timer
 
-    # CRITICAL FIX: Zero out membrane potentials and refractory timers
+    # Zero out membrane potentials and refractory timers
     mem[:] = 0.0
     refr[:] = 0
 
@@ -279,98 +279,6 @@ def main(multiplier: float):
     base_params.weight_variance = optimal_weight * 0.1
     lsm = SNN(simulation_params=base_params)
 
-    # ####################################################################
-    # ### START: LSM TRACE SEPARABILITY DEBUGGING BLOCK ###
-    # ####################################################################
-    print("\n" + "="*60)
-    print("🔬 RUNNING LSM TRACE SEPARABILITY TEST")
-    print("="*60)
-
-    label_map = load_label_map()
-    if label_map is None:
-        print("Skipping similarity test as label map could not be loaded.")
-    else:
-        try:
-            # --- 1. Find samples to compare ---
-            
-            # Sample A: The first training sample
-            idx_A = 0
-            label_A = y_train[idx_A]
-            text_A = label_map[label_A]
-            
-            # Sample B: The first sample that is a DIFFERENT sentence
-            idx_B = np.where(y_train != label_A)[0][0]
-            label_B = y_train[idx_B]
-            text_B = label_map[label_B]
-            
-            # Sample C: A different sample of the SAME sentence as A (an augmentation)
-            # Find indices that match label A but are not index 0
-            same_label_indices = np.where((y_train == label_A) & (np.arange(len(y_train)) != idx_A))[0]
-            
-            idx_C = None
-            if len(same_label_indices) > 0:
-                idx_C = same_label_indices[0]
-                label_C = y_train[idx_C]
-                text_C = label_map[label_C]
-
-            print(f"Comparing the following samples:")
-            print(f"  Sample A (idx {idx_A}): '{text_A}'")
-            print(f"  Sample B (idx {idx_B}): '{text_B}'")
-            if idx_C is not None:
-                print(f"  Sample C (idx {idx_C}): '{text_C}' (Augmentation of A)")
-            print("\nExtracting traces for comparison...")
-
-            # --- 2. Extract traces ---
-            trace_A = extract_membrane_traces(lsm, X_train[idx_A], lsm.output_neurons)
-            trace_B = extract_membrane_traces(lsm, X_train[idx_B], lsm.output_neurons)
-            if idx_C is not None:
-                trace_C = extract_membrane_traces(lsm, X_train[idx_C], lsm.output_neurons)
-
-            # --- 3. Flatten traces for similarity ---
-            # To compare two time-series, we flatten them into one long vector
-            vec_A = trace_A.flatten().reshape(1, -1)
-            vec_B = trace_B.flatten().reshape(1, -1)
-            if idx_C is not None:
-                vec_C = trace_C.flatten().reshape(1, -1)
-
-            # --- 4. Calculate and report cosine similarity ---
-            sim_AB = cosine_similarity(vec_A, vec_B)[0][0]
-            
-            print("\n--- Cosine Similarity Results ---")
-            print(f"  🎯 A vs B (DIFFERENT sentences): {sim_AB:.4f}")
-            
-            if idx_C is not None:
-                sim_AC = cosine_similarity(vec_A, vec_C)[0][0]
-                print(f"  🎯 A vs C (SAME sentence): {sim_AC:.4f}")
-
-            print("\n--- Interpretation ---")
-            if sim_AB > 0.6:
-                print(f"  ⚠️  WARNING: Similarity between DIFFERENT sentences is HIGH ({sim_AB:.4f}).")
-                print("      This suggests the LSM is not separating inputs well.")
-                print("      Consider lowering the weight multiplier (e.g., --multiplier 0.6) or increasing it.")
-            else:
-                print(f"  ✅ GOOD: Similarity between DIFFERENT sentences is LOW ({sim_AB:.4f}).")
-                print("      This suggests the LSM is separating inputs.")
-            
-            if idx_C is not None and sim_AC < 0.5:
-                print(f"  ⚠️  WARNING: Similarity between SAME sentence is LOW ({sim_AC:.4f}).")
-                print("      This suggests the LSM is too chaotic or sensitive.")
-            elif idx_C is not None:
-                print(f"  ✅ GOOD: Similarity between SAME sentence is HIGH ({sim_AC:.4f}).")
-
-        except Exception as e:
-            print(f"\n--- Error during similarity test ---")
-            print(f"  {e}")
-            print("  This might happen if the dataset is too small to find")
-            print("  both different sentences and augmentations in the first few samples.")
-            print("  Continuing with main trace extraction...")
-            
-    print("="*60 + "\n")
-    # ####################################################################
-    # ### END: LSM TRACE SEPARABILITY DEBUGGING BLOCK ###
-    # ####################################################################
-
-
     # Extract membrane potential traces
     print("\nExtracting membrane potential traces (full dataset)...")
     X_train_traces = extract_dataset_traces(lsm, X_train, "Training")
@@ -419,7 +327,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--multiplier",
         type=float,
-        default=1.0,
+        default=0.9,
         help="Multiplier for w_critico (try 0.7-0.9)"
     )
     args = parser.parse_args()
