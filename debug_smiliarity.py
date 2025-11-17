@@ -29,13 +29,19 @@ def load_data(npz_file="lsm_trace_sequences.npz", map_file="sentence_label_map.t
 def create_fingerprints(traces):
     """
     Creates a single "fingerprint" vector for each sample by
-    averaging the traces over the time dimension.
+    averaging the traces over the time dimension and centering.
     """
     print("  Creating 'fingerprint' vectors by averaging over time...")
     # Input shape: (Samples, Time, Channels) -> (800, 2000, 700)
     # Output shape: (Samples, Channels) -> (800, 700)
     fingerprints = np.mean(traces, axis=1)
-    
+
+    # CENTER the fingerprints by subtracting the global mean pattern
+    # This removes the dominant baseline activity that's shared across all samples
+    global_mean = fingerprints.mean(axis=0)
+    fingerprints = fingerprints - global_mean
+    print(f"  Centered fingerprints (removed global baseline pattern)")
+
     # Normalize the fingerprints (good practice for similarity)
     norm = np.linalg.norm(fingerprints, axis=1, keepdims=True)
     norm[norm == 0] = 1 # Avoid division by zero

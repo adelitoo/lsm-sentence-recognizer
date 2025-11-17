@@ -206,7 +206,11 @@ def generate_raster_plot(lsm, spike_sample, multiplier, plot_filename="lsm_raste
     mem[:] = 0.0
     refr[:] = 0
 
-    leak_factor = np.float32(1.0 - lsm.leak_coefficient)
+    # Use heterogeneous or uniform leak factor
+    if lsm.heterogeneous_leak:
+        leak_factor = lsm.leak_factors  # Per-neuron leak factors (N,)
+    else:
+        leak_factor = np.float32(1.0 - lsm.leak_coefficient)
     curr_amp = np.float32(lsm.current_amplitude)
     W = lsm.synaptic_weights.tocsr()
     indptr, indices, data = W.indptr, W.indices, W.data
@@ -221,17 +225,20 @@ def generate_raster_plot(lsm, spike_sample, multiplier, plot_filename="lsm_raste
         if t < inputs.shape[1]:
             spikes_t = inputs[:, t]
             mem[:Nin] += curr_amp * spikes_t
-            full_spike_matrix[t, :Nin] = spikes_t # Record input spikes
+            full_spike_matrix[t, :Nin] = spikes_t # Record external input spikes
 
         spiking_mask = (mem >= lsm.membrane_threshold) & (refr == 0)
-        full_spike_matrix[t, spiking_mask] = 1 # Record reservoir/output spikes
+        # Record only reservoir/output spikes (not input neurons) to avoid overwriting
+        reservoir_spiking_mask = spiking_mask.copy()
+        reservoir_spiking_mask[:Nin] = False  # Exclude input neurons
+        full_spike_matrix[t, reservoir_spiking_mask] = 1 # Record reservoir/output spikes
 
         spk_idx = np.flatnonzero(spiking_mask) # Get indices *before* reset
 
         if spiking_mask.any():
             mem[spiking_mask] = 0.0
             refr[spiking_mask] = lsm.refractory_period + 1
-        
+
         mem *= leak_factor
 
         if spiking_mask.any():
@@ -315,7 +322,11 @@ def extract_membrane_traces(lsm, spike_sample, output_neurons):
     refr[:] = 0
 
     out_idx = output_neurons
-    leak_factor = np.float32(1.0 - lsm.leak_coefficient) # <-- This uses the 'leak' from the lsm object
+    # Use heterogeneous or uniform leak factor
+    if lsm.heterogeneous_leak:
+        leak_factor = lsm.leak_factors  # Per-neuron leak factors (N,)
+    else:
+        leak_factor = np.float32(1.0 - lsm.leak_coefficient)
     curr_amp = np.float32(lsm.current_amplitude)
 
     W = lsm.synaptic_weights.tocsr()
@@ -405,7 +416,7 @@ def extract_dataset_traces(lsm, spike_data, desc=""):
 
 
 # --- MODIFIED: main now accepts 'leak' ---
-def main(multiplier: float, leak: float):
+def main(multiplier: float, leak: float, leak_variance_divisor: float = None):
 
     # Load spike dataset
     X_spikes, y_labels = load_spike_dataset(filename="sentence_spike_trains.npz")
@@ -429,7 +440,8 @@ def main(multiplier: float, leak: float):
         refractory_period=REFRACTORY_PERIOD,
         small_world_graph_p=SMALL_WORLD_P,
         small_world_graph_k=SMALL_WORLD_K,
-        input_spike_times=X_train[0]
+        input_spike_times=X_train[0],
+        leak_variance_divisor=leak_variance_divisor  # <-- NEW: Heterogeneous leak
     )
 
     # Calculate critical weight
@@ -439,6 +451,10 @@ def main(multiplier: float, leak: float):
     print(f"\nUsing weight multiplier: {multiplier:.2f}")
     print(f"  FINAL WEIGHT USED: {optimal_weight:.8f}")
     print(f"  LEAK COEFFICIENT USED: {leak:.4f}") # <-- MODIFIED: Confirmation print
+    if leak_variance_divisor is not None:
+        print(f"  HETEROGENEOUS LEAK: Enabled (std = {leak/leak_variance_divisor:.6f})")
+    else:
+        print(f"  HETEROGENEOUS LEAK: Disabled (uniform leak)")
 
     # Create LSM
     print(f"\nCreating LSM ({NUM_NEURONS} neurons, {NUM_OUTPUT_NEURONS} outputs)...")
@@ -555,7 +571,13 @@ if __name__ == "__main__":
         default=0,
         help="Leak coefficient (e.g., 0.01 to 0.1). Higher = faster leak / shorter memory."
     )
-    
+    parser.add_argument(
+        "--leak-variance-divisor",
+        type=float,
+        default=None,
+        help="Divisor for leak variance (e.g., 20 means std = leak/20). If not set, all neurons use same leak."
+    )
+
     args = parser.parse_args()
 
     print("\n" + "="*60)
@@ -564,4 +586,4 @@ if __name__ == "__main__":
     print("="*60)
 
     # --- MODIFIED: Pass leak to main ---
-    main(multiplier=args.multiplier, leak=args.leak)
+    main(multiplier=args.multiplier, leak=args.leak, leak_variance_divisor=args.leak_variance_divisor)

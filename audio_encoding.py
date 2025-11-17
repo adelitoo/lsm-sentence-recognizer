@@ -12,7 +12,7 @@ import pandas as pd
 
 # --- CRITICAL: SET THIS TO YOUR MAX SENTENCE LENGTH ---
 # IMPORTANT: Sentences are ~1.7s, so 3.0s gives reasonable padding
-DURATION = 3.0  # Adjusted to match actual sentence lengths
+DURATION = 2.0  # Adjusted to match actual sentence lengths
 
 SAMPLE_RATE = 16000
 TIME_BINS = 500  # This will be 2000 after multi-threshold encoding
