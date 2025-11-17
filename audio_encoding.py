@@ -22,7 +22,8 @@ VISUALIZE_FIRST_SAMPLE = False
 REDUNDANCY_FACTOR = 1 # Keep this at 1
 
 # --- AUGMENTATION SETTINGS ---
-NUM_AUGMENTATIONS = 5  # Number of augmented versions per audio sample
+# <-- CHANGED: Set default to 1 to disable augmentation
+NUM_AUGMENTATIONS = 1  # Number of augmented versions per audio sample (1 = original only)
 TIME_SHIFT_MS = 5.0  # Time shift range in milliseconds
 NOISE_SNR_DB = 25.0  # Signal-to-noise ratio for additive noise
 PITCH_SHIFT_SEMITONES = 1  # Pitch shift range in semitones
@@ -159,6 +160,7 @@ def create_augmented_versions(audio: np.ndarray, num_augmentations: int = NUM_AU
     # 1. Original
     augmented_list.append(audio.copy())
 
+    # <-- This logic already handles num_augmentations=1
     if num_augmentations < 2:
         return augmented_list
 
@@ -341,11 +343,19 @@ def create_dataset(n_filters: int, filterbank: str):
     print(f"  Input neurons per sample: {n_filters * REDUNDANCY_FACTOR}")
     print(f"  Encoding: Hysteresis (Gap: {HYSTERESIS_GAP})")
     print(f"  ")
-    print(f"  🎲 DATA AUGMENTATION ENABLED:")
-    print(f"     Augmentations per sample: {NUM_AUGMENTATIONS}")
-    print(f"     Expected total samples: {len(metadata)} × {NUM_AUGMENTATIONS} = {len(metadata) * NUM_AUGMENTATIONS}")
-    print(f"     Techniques: time shift (±{TIME_SHIFT_MS}ms), noise (SNR={NOISE_SNR_DB}dB),")
-    print(f"                 pitch shift (±{PITCH_SHIFT_SEMITONES} semitones), time stretch")
+    
+    # <-- CHANGED: Added if/else to print correct status
+    if NUM_AUGMENTATIONS > 1:
+        print(f"  🎲 DATA AUGMENTATION ENABLED:")
+        print(f"     Augmentations per sample: {NUM_AUGMENTATIONS}")
+        print(f"     Expected total samples: {len(metadata)} × {NUM_AUGMENTATIONS} = {len(metadata) * NUM_AUGMENTATIONS}")
+        print(f"     Techniques: time shift (±{TIME_SHIFT_MS}ms), noise (SNR={NOISE_SNR_DB}dB),")
+        print(f"                 pitch shift (±{PITCH_SHIFT_SEMITONES} semitones), time stretch")
+    else:
+        print(f"  ℹ️  DATA AUGMENTATION DISABLED (NUM_AUGMENTATIONS=1)")
+        print(f"     Augmentations per sample: 1 (Originals only)")
+        print(f"     Expected total samples: {len(metadata)}")
+        
     print("="*60 + "\n")
 
     # --- Process Files from CSV ---
@@ -366,6 +376,7 @@ def create_dataset(n_filters: int, filterbank: str):
             continue
 
         # Create augmented versions of the audio
+        # If NUM_AUGMENTATIONS=1, this list will only contain the original audio
         augmented_audios = create_augmented_versions(audio_data, NUM_AUGMENTATIONS)
 
         # Process each augmented version
@@ -431,8 +442,10 @@ if __name__ == "__main__":
                         help="Number of filters to use in the filterbank (default: 128).")
     parser.add_argument("--filterbank", type=str, default="gammatone", choices=["mel", "gammatone"],
                         help="Type of filterbank to use (default: gammatone).")
-    parser.add_argument("--num-augmentations", type=int, default=5,
-                        help="Number of augmented versions per sample (default: 5, set to 1 to disable).")
+    
+    # <-- CHANGED: Updated default from 5 to 1 and changed help text
+    parser.add_argument("--num-augmentations", type=int, default=1,
+                        help="Number of augmented versions per sample (default: 1, set > 1 to enable).")
 
     args = parser.parse_args()
 

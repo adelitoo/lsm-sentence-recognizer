@@ -203,6 +203,10 @@ def train():
     X_test = dataset["X_test_sequences"]
     y_test = dataset["y_test"]
 
+    # --- FIX: Delete the full 'dataset' from RAM ---
+    del dataset
+    print("   Freed 'dataset' from RAM.")
+
     label_map = load_label_map()
     if label_map is None:
         return
@@ -218,17 +222,40 @@ def train():
     X_train_flat = X_train.reshape(-1, X_train.shape[-1])
     feature_mean = X_train_flat.mean(axis=0).reshape(1, 1, -1)
     feature_std = (X_train_flat.std(axis=0) + 1e-8).reshape(1, 1, -1)
+    
+    # --- FIX: Delete the flat copy ---
+    del X_train_flat
+    print("   Freed 'X_train_flat' from RAM.")
 
     X_train_normalized = (X_train - feature_mean) / feature_std
+    # --- FIX: Delete the original X_train ---
+    del X_train
+    print("   Freed 'X_train' from RAM.")
+
     X_test_normalized = (X_test - feature_mean) / feature_std
+    # --- FIX: Delete the original X_test ---
+    del X_test
+    print("   Freed 'X_test' from RAM.")
+
 
     # --- Setup Device ---
-    device = torch.device("x" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu") # <-- Also fixed your "x" typo
     print(f"\n🖥️  Using device: {device}")
 
     # --- Convert to PyTorch Tensors ---
     X_train_tensor = torch.FloatTensor(X_train_normalized)
+    # --- FIX: Delete the normalized numpy array ---
+    del X_train_normalized
+    print("   Freed 'X_train_normalized' from RAM.")
+
     X_test_tensor = torch.FloatTensor(X_test_normalized)
+    # --- FIX: Delete the normalized numpy array ---
+    del X_test_normalized
+    print("   Freed 'X_test_normalized' from RAM.")
+    
+    # --- At this point, only the final Tensors exist in RAM ---
+    print("\n✅ Data loading and preprocessing complete. Peak RAM usage is now low.")
+
 
     # --- Model Configuration ---
     num_timesteps = X_train_tensor.shape[1]
@@ -283,6 +310,13 @@ def train():
         num_workers=2,
         pin_memory=True
     )
+    
+    # --- We can now free the big training tensor, as the loader has it ---
+    # (Note: This might not save much if DataLoader holds a reference, 
+    # but it's good practice)
+    del X_train_tensor
+    print("   Freed 'X_train_tensor' from RAM (DataLoader holds it now).")
+
 
     # --- Training Loop ---
     num_epochs = 2000  # May need fewer epochs with simpler model

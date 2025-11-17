@@ -10,6 +10,9 @@ Key difference from feature extraction:
 - Direct input to CTC/GRU for temporal learning
 
 *** MODIFIED: Includes a cosine similarity test for trace separability ***
+*** MODIFIED: Includes LSM activity debugging (spike counts, active neurons) ***
+*** MODIFIED: Generates a 3-panel raster plot for the first sample ***
+*** MODIFIED: 'leak_coefficient' is now a command-line argument ***
 """
 
 import numpy as np
@@ -17,6 +20,7 @@ from snnpy.snn import SNN, SimulationParams
 from tqdm import tqdm
 from pathlib import Path
 import argparse
+import matplotlib.pyplot as plt
 
 # --- NEW IMPORTS ---
 import pandas as pd
@@ -24,12 +28,12 @@ from sklearn.metrics.pairwise import cosine_similarity
 # -------------------
 
 # --- Network Parameters (matching the spike feature version) ---
-NUM_NEURONS = 1000
-NUM_OUTPUT_NEURONS = 400
-LEAK_COEFFICIENT = 0.01
+NUM_NEURONS = 2000
+NUM_OUTPUT_NEURONS = 700
+# LEAK_COEFFICIENT = 0.02  # <-- MODIFIED: This is now set by --leak arg
 REFRACTORY_PERIOD = 2
 MEMBRANE_THRESHOLD = 2
-SMALL_WORLD_P = 0.2
+SMALL_WORLD_P = 0.3
 SMALL_WORLD_K = int(0.10 * NUM_NEURONS * 2)
 
 np.random.seed(42)
@@ -155,14 +159,138 @@ def split_by_sentence(X_spikes, y_labels, test_size=0.2, random_state=42):
     return X_train, X_test, y_train, y_test
 
 
+# --- 📊 NEW PLOTTING FUNCTION ---
+def generate_raster_plot(lsm, spike_sample, multiplier, plot_filename="lsm_raster_plot.png"):
+    """
+    Runs a single simulation to generate and save a raster plot
+    of input, reservoir (non-output), and output neurons.
+    """
+    print(f"\n--- 📊 Generating Raster Plot for first sample ---")
+    
+    # --- 1. Select Neuron Indices ---
+    Nin = lsm.num_input_neurons
+    N = lsm.num_neurons
+    T = spike_sample.shape[1]
+
+    # Select up to 50 distributed input neurons
+    num_inputs_to_plot = min(50, Nin)
+    input_indices = np.linspace(0, Nin - 1, num_inputs_to_plot, dtype=int)
+
+    # Select up to 50 distributed non-output reservoir neurons
+    output_set = set(lsm.output_neurons)
+    reservoir_indices_all = np.array([i for i in np.arange(Nin, N) if i not in output_set])
+    num_reservoir_to_plot = min(50, len(reservoir_indices_all))
+    
+    if num_reservoir_to_plot > 0:
+        reservoir_indices = reservoir_indices_all[np.linspace(0, len(reservoir_indices_all) - 1, num_reservoir_to_plot, dtype=int)]
+    else:
+        reservoir_indices = np.array([], dtype=int) # Handle case with no non-output neurons
+
+    # Select up to 50 distributed output neurons
+    num_outputs_to_plot = min(50, len(lsm.output_neurons))
+    if num_outputs_to_plot > 0:
+        output_indices = lsm.output_neurons[np.linspace(0, len(lsm.output_neurons) - 1, num_outputs_to_plot, dtype=int)]
+    else:
+        output_indices = np.array([], dtype=int)
+    
+    print(f"  Plotting {len(input_indices)} inputs, {len(reservoir_indices)} reservoir, {len(output_indices)} outputs.")
+
+    # --- 2. Run Simulation to get all spikes ---
+    # (This is a copy of the loop from extract_membrane_traces, but stores all spikes)
+    lsm.reset()
+    lsm.set_input_spike_times(spike_sample)
+
+    inputs = spike_sample
+    mem = lsm.membrane_potentials
+    refr = lsm.refractory_timer
+    mem[:] = 0.0
+    refr[:] = 0
+
+    leak_factor = np.float32(1.0 - lsm.leak_coefficient)
+    curr_amp = np.float32(lsm.current_amplitude)
+    W = lsm.synaptic_weights.tocsr()
+    indptr, indices, data = W.indptr, W.indices, W.data
+
+    # We need the full spike matrix to select from
+    full_spike_matrix = np.zeros((T, N), dtype=np.uint8)
+
+    for t in range(T):
+        refr -= lsm.time_step
+        np.clip(refr, 0, None, out=refr)
+
+        if t < inputs.shape[1]:
+            spikes_t = inputs[:, t]
+            mem[:Nin] += curr_amp * spikes_t
+            full_spike_matrix[t, :Nin] = spikes_t # Record input spikes
+
+        spiking_mask = (mem >= lsm.membrane_threshold) & (refr == 0)
+        full_spike_matrix[t, spiking_mask] = 1 # Record reservoir/output spikes
+
+        spk_idx = np.flatnonzero(spiking_mask) # Get indices *before* reset
+
+        if spiking_mask.any():
+            mem[spiking_mask] = 0.0
+            refr[spiking_mask] = lsm.refractory_period + 1
+        
+        mem *= leak_factor
+
+        if spiking_mask.any():
+            for j in spk_idx:
+                start, end = indptr[j], indptr[j + 1]
+                if start != end:
+                    cols = indices[start:end]
+                    mem[cols] += data[start:end]
+
+    # --- 3. Extract spike data for plotting ---
+    input_spikes = full_spike_matrix[:, input_indices]
+    reservoir_spikes = full_spike_matrix[:, reservoir_indices]
+    output_spikes = full_spike_matrix[:, output_indices]
+
+    # --- 4. Generate Plot ---
+    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(15, 10), sharex=True, gridspec_kw={'height_ratios': [1, 1, 1]})
+    
+    # Helper for eventplot
+    def plot_raster(ax, spikes, title, color):
+        if spikes.shape[1] == 0: # Handle case with 0 neurons
+             ax.set_title(f"{title} (0 neurons selected)")
+             ax.set_yticks([])
+             ax.set_ylabel("Neuron Index")
+             return
+        
+        spike_times_list = []
+        for i in range(spikes.shape[1]):
+            spike_times = np.where(spikes[:, i] == 1)[0]
+            spike_times_list.append(spike_times)
+        
+        ax.eventplot(spike_times_list, colors=color, linelengths=0.8)
+        ax.set_ylabel("Neuron Index")
+        ax.set_title(title)
+        ax.set_yticks([0, max(0, spikes.shape[1] - 1)]) # Handle case with 1 neuron
+        ax.set_ylim(-1, spikes.shape[1])
+
+    plot_raster(ax1, input_spikes, f"Input Neurons ({num_inputs_to_plot} / {Nin})", "blue")
+    plot_raster(ax2, reservoir_spikes, f"Reservoir Neurons ({num_reservoir_to_plot} / {len(reservoir_indices_all)})", "green")
+    plot_raster(ax3, output_spikes, f"Output Neurons ({num_outputs_to_plot} / {len(lsm.output_neurons)})", "red")
+
+    ax3.set_xlabel("Time Step")
+    fig.suptitle(f"LSM Raster Plot (w_mult: {multiplier:.2f}, leak: {lsm.leak_coefficient:.3f})", fontsize=16, y=1.02) # <-- MODIFIED
+    fig.tight_layout()
+
+    try:
+        plt.savefig(plot_filename, bbox_inches="tight")
+        print(f"  ✅ Raster plot saved to '{plot_filename}'")
+    except Exception as e:
+        print(f"  ❌ Error saving plot: {e}")
+    
+    plt.close(fig) # Close the figure to save memory
+# --- ---------------------- ---
+
+
 def extract_membrane_traces(lsm, spike_sample, output_neurons):
     """
     Extract membrane potential traces from LSM output neurons over time.
-
-    This requires modifying the simulation to record membrane potentials
-    at each timestep for the output neurons.
-
-    Returns: (timesteps, num_output_neurons) array of membrane voltages
+    
+    *** MODIFIED: Now also returns debugging info (total_reservoir_spikes, num_active_reservoir_neurons) ***
     """
     lsm.reset()
     lsm.set_input_spike_times(spike_sample)
@@ -187,11 +315,16 @@ def extract_membrane_traces(lsm, spike_sample, output_neurons):
     refr[:] = 0
 
     out_idx = output_neurons
-    leak_factor = np.float32(1.0 - lsm.leak_coefficient)
+    leak_factor = np.float32(1.0 - lsm.leak_coefficient) # <-- This uses the 'leak' from the lsm object
     curr_amp = np.float32(lsm.current_amplitude)
 
     W = lsm.synaptic_weights.tocsr()
     indptr, indices, data = W.indptr, W.indices, W.data
+    
+    # --- 🧠 DEBUGGING VARS ---
+    total_reservoir_spikes = 0
+    active_reservoir_neurons = set()
+    # --- END DEBUGGING VARS ---
 
     for t in range(T):
         # Decay refractory timers
@@ -205,9 +338,20 @@ def extract_membrane_traces(lsm, spike_sample, output_neurons):
 
         # Check for spiking neurons
         spiking_mask = (mem >= lsm.membrane_threshold) & (refr == 0)
+        
+        spk_idx = np.flatnonzero(spiking_mask) # Get indices *before* reset
 
         if spiking_mask.any():
-            spk_idx = np.flatnonzero(spiking_mask)
+            # --- 🧠 DEBUGGING LOGIC ---
+            # Find which of these are in the reservoir (not input)
+            reservoir_spikes_mask = spk_idx >= Nin
+            if reservoir_spikes_mask.any():
+                num_spikes_this_step = np.sum(reservoir_spikes_mask)
+                total_reservoir_spikes += num_spikes_this_step
+                
+                # Add the *neuron indices* to the set
+                active_reservoir_neurons.update(spk_idx[reservoir_spikes_mask])
+            # --- END DEBUGGING LOGIC ---
 
             # Reset spiking neurons
             mem[spiking_mask] = 0.0
@@ -218,7 +362,8 @@ def extract_membrane_traces(lsm, spike_sample, output_neurons):
 
         # Propagate spikes through network
         if spiking_mask.any():
-            for j in np.flatnonzero(spiking_mask):
+            # NOTE: We use spk_idx captured before leak/reset
+            for j in spk_idx: 
                 start, end = indptr[j], indptr[j + 1]
                 if start != end:
                     cols = indices[start:end]
@@ -227,19 +372,40 @@ def extract_membrane_traces(lsm, spike_sample, output_neurons):
         # Record membrane potentials of output neurons
         membrane_trace[t, :] = mem[out_idx]
 
-    return membrane_trace
+    # --- MODIFIED: Return new metrics ---
+    return membrane_trace, total_reservoir_spikes, len(active_reservoir_neurons)
 
 
 def extract_dataset_traces(lsm, spike_data, desc=""):
-    """Extract membrane traces for entire dataset"""
+    """
+    Extract membrane traces for entire dataset
+    
+    *** MODIFIED: Now also returns debugging info (spike counts, active counts) ***
+    """
     all_traces = []
+    
+    # --- 🧠 DEBUGGING ---
+    all_reservoir_spikes = []
+    all_active_counts = []
+    # --- END DEBUGGING ---
+
     for sample in tqdm(spike_data, desc=desc):
-        traces = extract_membrane_traces(lsm, sample, lsm.output_neurons)
+        # --- MODIFIED: Get new metrics ---
+        traces, total_spikes, active_count = extract_membrane_traces(lsm, sample, lsm.output_neurons)
+        
         all_traces.append(traces)
-    return np.array(all_traces, dtype=np.float32)
+
+        # --- DEBUGGING ---
+        all_reservoir_spikes.append(total_spikes)
+        all_active_counts.append(active_count)
+        # --- END DEBUGGING ---
+
+    # --- MODIFIED: Return new metrics ---
+    return np.array(all_traces, dtype=np.float32), np.array(all_reservoir_spikes), np.array(all_active_counts)
 
 
-def main(multiplier: float):
+# --- MODIFIED: main now accepts 'leak' ---
+def main(multiplier: float, leak: float):
 
     # Load spike dataset
     X_spikes, y_labels = load_spike_dataset(filename="sentence_spike_trains.npz")
@@ -259,7 +425,7 @@ def main(multiplier: float):
         num_output_neurons=NUM_OUTPUT_NEURONS,
         is_random_uniform=False,
         membrane_threshold=MEMBRANE_THRESHOLD,
-        leak_coefficient=LEAK_COEFFICIENT,
+        leak_coefficient=leak, # <-- MODIFIED: Use the 'leak' parameter
         refractory_period=REFRACTORY_PERIOD,
         small_world_graph_p=SMALL_WORLD_P,
         small_world_graph_k=SMALL_WORLD_K,
@@ -272,21 +438,73 @@ def main(multiplier: float):
 
     print(f"\nUsing weight multiplier: {multiplier:.2f}")
     print(f"  FINAL WEIGHT USED: {optimal_weight:.8f}")
+    print(f"  LEAK COEFFICIENT USED: {leak:.4f}") # <-- MODIFIED: Confirmation print
 
     # Create LSM
     print(f"\nCreating LSM ({NUM_NEURONS} neurons, {NUM_OUTPUT_NEURONS} outputs)...")
     base_params.mean_weight = optimal_weight
     base_params.weight_variance = optimal_weight * 0.1
     lsm = SNN(simulation_params=base_params)
+    
+    # --- 🧠 DEBUGGING: Get reservoir size ---
+    num_reservoir_neurons = lsm.num_neurons - lsm.num_input_neurons
+    print(f"  Input Neurons: {lsm.num_input_neurons}")
+    print(f"  Reservoir Neurons: {num_reservoir_neurons}")
+    # --- END DEBUGGING ---
+    
+    
+    # --- 📊 NEW: Generate Raster Plot for first training sample ---
+    generate_raster_plot(lsm, X_train[0], multiplier, "lsm_raster_plot.png")
+    # --- ---------------------------------------------------- ---
+
 
     # Extract membrane potential traces
     print("\nExtracting membrane potential traces (full dataset)...")
-    X_train_traces = extract_dataset_traces(lsm, X_train, "Training")
-    X_test_traces = extract_dataset_traces(lsm, X_test, "Testing")
+    
+    # --- MODIFIED: Capture debug stats ---
+    X_train_traces, train_spikes, train_active = extract_dataset_traces(lsm, X_train, "Training")
+    X_test_traces, test_spikes, test_active = extract_dataset_traces(lsm, X_test, "Testing")
 
     print(f"\nExtracted traces:")
     print(f"  Train shape: {X_train_traces.shape}")  # (samples, timesteps, neurons)
     print(f"  Test shape: {X_test_traces.shape}")
+
+
+    # --- 🧠 NEW DEBUGGING STATS ---
+    print(f"\n--- 🧠 LSM Activity Debugging ---")
+    print(f"  LSM Reservoir Size: {num_reservoir_neurons} neurons")
+    
+    # Train stats
+    avg_train_spikes = np.mean(train_spikes)
+    avg_train_active = np.mean(train_active)
+    avg_train_active_pct = (avg_train_active / num_reservoir_neurons) * 100
+    
+    print(f"\n  [TRAIN] (n={len(X_train_traces)} samples):")
+    print(f"    Avg. Reservoir Spikes / sample: {avg_train_spikes:.1f}")
+    print(f"    Avg. Active Reservoir Neurons / sample: {avg_train_active:.1f} ({avg_train_active_pct:.2f}%)")
+    print(f"    (Min/Max Spikes: {np.min(train_spikes)} / {np.max(train_spikes)})")
+
+    # Test stats
+    avg_test_spikes = np.mean(test_spikes)
+    avg_test_active = np.mean(test_active)
+    avg_test_active_pct = (avg_test_active / num_reservoir_neurons) * 100
+
+    print(f"\n  [TEST] (n={len(X_test_traces)} samples):")
+    print(f"    Avg. Reservoir Spikes / sample: {avg_test_spikes:.1f}")
+    print(f"    Avg. Active Reservoir Neurons / sample: {avg_test_active:.1f} ({avg_test_active_pct:.2f}%)")
+    print(f"    (Min/Max Spikes: {np.min(test_spikes)} / {np.max(test_spikes)})")
+    
+    print("\n  ℹ️  Interpretation:")
+    if avg_train_active_pct < 1.0:
+        print(f"  ❌ WARNING: Activity is < 1%. Your network is likely 'dead'.")
+        print(f"     Try a HIGHER '--multiplier' (e.g., 0.9, 1.0, 1.1).")
+    elif avg_train_active_pct > 50.0:
+        print(f"  ⚠️  WARNING: Activity is > 50%. Your network might be 'saturated'.")
+        print(f"     Try a LOWER '--multiplier'.")
+    else:
+        print(f"  ✅ Network activity is in a plausible range ({avg_train_active_pct:.1f}%).")
+    # --- END DEBUGGING STATS ---
+
 
     # Calculate trace statistics
     print(f"\n--- Trace Statistics ---")
@@ -327,9 +545,17 @@ if __name__ == "__main__":
     parser.add_argument(
         "--multiplier",
         type=float,
-        default=0.9,
+        default=0.4,
         help="Multiplier for w_critico (try 0.7-0.9)"
     )
+    # --- MODIFIED: Added leak argument ---
+    parser.add_argument(
+        "--leak",
+        type=float,
+        default=0,
+        help="Leak coefficient (e.g., 0.01 to 0.1). Higher = faster leak / shorter memory."
+    )
+    
     args = parser.parse_args()
 
     print("\n" + "="*60)
@@ -337,4 +563,5 @@ if __name__ == "__main__":
     print("Testing TRUE generalization to unseen sentences!")
     print("="*60)
 
-    main(multiplier=args.multiplier)
+    # --- MODIFIED: Pass leak to main ---
+    main(multiplier=args.multiplier, leak=args.leak)
