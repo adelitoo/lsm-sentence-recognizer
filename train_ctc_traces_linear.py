@@ -1,16 +1,3 @@
-"""
-CTC Training with LINEAR Readout Only (No GRU)
-
-This tests whether the LSM features alone are sufficient,
-or if the GRU was doing the heavy lifting.
-
-Key difference from train_ctc_traces.py:
-- Replaces 3-layer BiGRU with single linear layer
-- Forces LSM to provide all temporal/context information
-- If accuracy drops significantly → GRU was doing the work
-- If accuracy stays high → LSM is doing the work
-"""
-
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -127,16 +114,10 @@ class CTCReadoutLinear(nn.Module):
 
     This forces the LSM to provide all temporal and context information.
     No recurrent processing, no temporal modeling in the readout.
-
-    Compare this to the 3-layer BiGRU in train_ctc_traces.py!
     """
 
     def __init__(self, input_features, num_classes):
         super().__init__()
-
-        print("\n⚠️  WARNING: Using LINEAR readout only (no GRU)")
-        print("   This tests if LSM features alone are sufficient.")
-        print("   If accuracy drops significantly, GRU was doing the work.\n")
 
         # ONLY a single linear layer - no temporal modeling!
         self.linear = nn.Linear(input_features, num_classes)
@@ -467,17 +448,15 @@ def train():
     char_acc_drop = 89.77 - avg_char_acc
 
     if char_acc_drop < 10:
-        print("🎉 CONCLUSION: LSM IS DOING THE WORK!")
+        print("🎉 CONCLUSION")
         print("   The LSM features alone are sufficient for high accuracy.")
         print("   Character accuracy dropped by less than 10%.")
-        print("   ✅ Your supervisor's requirement is satisfied!")
     elif char_acc_drop < 30:
-        print("⚠️  CONCLUSION: SHARED WORK")
-        print("   Both LSM and GRU contribute significantly.")
+        print("⚠️  CONCLUSION")
         print("   Consider enhancing LSM (bigger reservoir, longer memory)")
         print("   to shift more work to the LSM.")
     else:
-        print("❌ CONCLUSION: GRU WAS DOING THE HEAVY LIFTING")
+        print("❌ CONCLUSION")
         print("   Character accuracy dropped significantly.")
         print("   The LSM features alone are NOT sufficient.")
         print("   You need to enhance the LSM to satisfy your supervisor.")

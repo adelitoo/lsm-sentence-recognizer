@@ -165,11 +165,11 @@ if len(sentences) < TARGET_SENTENCES:
 
     augmented = 0
     for base in base_sentences:
-        if len(sentences) >= 500:
+        if len(sentences) >= TARGET_SENTENCES:
             break
 
         for method in augmentation_methods:
-            if len(sentences) >= 500:
+            if len(sentences) >= TARGET_SENTENCES:
                 break
 
             aug_sentence = method(base)

@@ -1,22 +1,5 @@
-"""
-LSM Trace Extraction with SENTENCE-LEVEL SPLIT (500 Sentences)
-
-This version extracts MEMBRANE POTENTIAL TRACES (not spike-based features) from LSM output neurons.
-Uses sentence-level split for true generalization testing.
-
-Key difference from feature extraction:
-- Records membrane voltages over time (continuous analog signal)
-- No windowing, no aggregation
-- Direct input to CTC/GRU for temporal learning
-
-*** MODIFIED: Includes a cosine similarity test for trace separability ***
-*** MODIFIED: Includes LSM activity debugging (spike counts, active neurons) ***
-*** MODIFIED: Generates a 3-panel raster plot for the first sample ***
-*** MODIFIED: 'leak_coefficient' is now a command-line argument ***
-"""
-
 import numpy as np
-from snnpy.snn import SNN, SimulationParams
+from snnpy.snn import Reservoir, SimulationParams
 from tqdm import tqdm
 from pathlib import Path
 import argparse
@@ -415,121 +398,125 @@ def extract_dataset_traces(lsm, spike_data, desc=""):
     return np.array(all_traces, dtype=np.float32), np.array(all_reservoir_spikes), np.array(all_active_counts)
 
 
-# --- MODIFIED: main now accepts 'leak' ---
 def main(multiplier: float, leak: float, leak_variance_divisor: float = None):
 
-    # Load spike dataset
+    # 1. Load spike dataset
     X_spikes, y_labels = load_spike_dataset(filename="sentence_spike_trains.npz")
     if X_spikes is None:
         return
 
-    # Split data BY SENTENCE (not by sample!)
+    # 2. Split data BY SENTENCE
     X_train, X_test, y_train, y_test = split_by_sentence(
         X_spikes, y_labels, test_size=0.2, random_state=42
     )
 
-    # Create LSM parameters
-    base_params = SimulationParams(
+    # 3. Calculate w_critico (Using Temporary Params)
+    # We need a dummy object just to calculate the critical weight scaling
+    temp_params = SimulationParams(
         num_neurons=NUM_NEURONS,
         mean_weight=0.0,
-        weight_variance=0.0,
+        weight_variance=5.0,
         num_output_neurons=NUM_OUTPUT_NEURONS,
         is_random_uniform=False,
         membrane_threshold=MEMBRANE_THRESHOLD,
-        leak_coefficient=leak, # <-- MODIFIED: Use the 'leak' parameter
+        leak_coefficient=leak,
         refractory_period=REFRACTORY_PERIOD,
         small_world_graph_p=SMALL_WORLD_P,
         small_world_graph_k=SMALL_WORLD_K,
         input_spike_times=X_train[0],
-        leak_variance_divisor=leak_variance_divisor  # <-- NEW: Heterogeneous leak
+        mean_distance=0.0, # Dummy value required for class validation
+        leak_variance_divisor=leak_variance_divisor
     )
 
-    # Calculate critical weight
-    w_critico_calculated = calculate_theoretical_w_critico(base_params, X_train)
+    w_critico_calculated = calculate_theoretical_w_critico(temp_params, X_train)
+    
+    # 4. Calculate Optimal Weight and Distance
     optimal_weight = w_critico_calculated * multiplier
+    
+    # Use the Professor's Ratio: Distance = 15 * Weight
+    # This ensures the excitatory/inhibitory clusters separate as weights get stronger
+    distance_coeff = 15.0 
+    optimal_distance = distance_coeff * optimal_weight
 
     print(f"\nUsing weight multiplier: {multiplier:.2f}")
     print(f"  FINAL WEIGHT USED: {optimal_weight:.8f}")
-    print(f"  LEAK COEFFICIENT USED: {leak:.4f}") # <-- MODIFIED: Confirmation print
+    print(f"  MEAN DISTANCE: {optimal_distance:.8f}")
+    print(f"  LEAK COEFFICIENT: {leak:.4f}")
+    
     if leak_variance_divisor is not None:
-        print(f"  HETEROGENEOUS LEAK: Enabled (std = {leak/leak_variance_divisor:.6f})")
+        print(f"  HETEROGENEOUS LEAK: Enabled (Divisor {leak_variance_divisor})")
     else:
-        print(f"  HETEROGENEOUS LEAK: Disabled (uniform leak)")
+        print(f"  HETEROGENEOUS LEAK: Disabled (Uniform)")
 
-    # Create LSM
-    print(f"\nCreating LSM ({NUM_NEURONS} neurons, {NUM_OUTPUT_NEURONS} outputs)...")
-    base_params.mean_weight = optimal_weight
-    base_params.weight_variance = optimal_weight * 0.1
-    lsm = SNN(simulation_params=base_params)
+    # 5. Create the Real Reservoir
+    print(f"\nCreating Reservoir ({NUM_NEURONS} neurons, {NUM_OUTPUT_NEURONS} outputs)...")
+    
+    base_params = SimulationParams(
+        num_neurons=NUM_NEURONS,
+        mean_weight=optimal_weight,
+        
+        # FIXED VARIANCE: Use 5.0 (High Variance/Hubs) instead of scaling by weight
+        weight_variance=5.0, 
+        
+        num_output_neurons=NUM_OUTPUT_NEURONS,
+        is_random_uniform=False,
+        membrane_threshold=MEMBRANE_THRESHOLD,
+        leak_coefficient=leak,
+        refractory_period=REFRACTORY_PERIOD,
+        small_world_graph_p=SMALL_WORLD_P,
+        small_world_graph_k=SMALL_WORLD_K,
+        input_spike_times=X_train[0],
+        
+        # NEW MANDATORY PARAMS
+        mean_distance=optimal_distance, 
+        leak_variance_divisor=leak_variance_divisor
+    )
+    
+    # Use Reservoir class (not SNN)
+    lsm = Reservoir(simulation_params=base_params)
     
     # --- 🧠 DEBUGGING: Get reservoir size ---
     num_reservoir_neurons = lsm.num_neurons - lsm.num_input_neurons
     print(f"  Input Neurons: {lsm.num_input_neurons}")
     print(f"  Reservoir Neurons: {num_reservoir_neurons}")
-    # --- END DEBUGGING ---
     
-    
-    # --- 📊 NEW: Generate Raster Plot for first training sample ---
+    # --- 📊 Generate Raster Plot for first training sample ---
     generate_raster_plot(lsm, X_train[0], multiplier, "lsm_raster_plot.png")
-    # --- ---------------------------------------------------- ---
 
-
-    # Extract membrane potential traces
+    # 6. Extract membrane potential traces
     print("\nExtracting membrane potential traces (full dataset)...")
     
-    # --- MODIFIED: Capture debug stats ---
     X_train_traces, train_spikes, train_active = extract_dataset_traces(lsm, X_train, "Training")
     X_test_traces, test_spikes, test_active = extract_dataset_traces(lsm, X_test, "Testing")
 
     print(f"\nExtracted traces:")
-    print(f"  Train shape: {X_train_traces.shape}")  # (samples, timesteps, neurons)
+    print(f"  Train shape: {X_train_traces.shape}") 
     print(f"  Test shape: {X_test_traces.shape}")
 
-
-    # --- 🧠 NEW DEBUGGING STATS ---
+    # --- 🧠 LSM Activity Debugging ---
     print(f"\n--- 🧠 LSM Activity Debugging ---")
-    print(f"  LSM Reservoir Size: {num_reservoir_neurons} neurons")
     
     # Train stats
-    avg_train_spikes = np.mean(train_spikes)
     avg_train_active = np.mean(train_active)
     avg_train_active_pct = (avg_train_active / num_reservoir_neurons) * 100
     
-    print(f"\n  [TRAIN] (n={len(X_train_traces)} samples):")
-    print(f"    Avg. Reservoir Spikes / sample: {avg_train_spikes:.1f}")
-    print(f"    Avg. Active Reservoir Neurons / sample: {avg_train_active:.1f} ({avg_train_active_pct:.2f}%)")
-    print(f"    (Min/Max Spikes: {np.min(train_spikes)} / {np.max(train_spikes)})")
+    print(f"  [TRAIN] Avg. Active Reservoir Neurons: {avg_train_active:.1f} ({avg_train_active_pct:.2f}%)")
 
     # Test stats
-    avg_test_spikes = np.mean(test_spikes)
     avg_test_active = np.mean(test_active)
     avg_test_active_pct = (avg_test_active / num_reservoir_neurons) * 100
 
-    print(f"\n  [TEST] (n={len(X_test_traces)} samples):")
-    print(f"    Avg. Reservoir Spikes / sample: {avg_test_spikes:.1f}")
-    print(f"    Avg. Active Reservoir Neurons / sample: {avg_test_active:.1f} ({avg_test_active_pct:.2f}%)")
-    print(f"    (Min/Max Spikes: {np.min(test_spikes)} / {np.max(test_spikes)})")
+    print(f"  [TEST] Avg. Active Reservoir Neurons: {avg_test_active:.1f} ({avg_test_active_pct:.2f}%)")
     
     print("\n  ℹ️  Interpretation:")
     if avg_train_active_pct < 1.0:
-        print(f"  ❌ WARNING: Activity is < 1%. Your network is likely 'dead'.")
-        print(f"     Try a HIGHER '--multiplier' (e.g., 0.9, 1.0, 1.1).")
+        print(f"  ❌ WARNING: Activity is < 1%. Network is 'dead'. Increase Multiplier.")
     elif avg_train_active_pct > 50.0:
-        print(f"  ⚠️  WARNING: Activity is > 50%. Your network might be 'saturated'.")
-        print(f"     Try a LOWER '--multiplier'.")
+        print(f"  ⚠️  WARNING: Activity is > 50%. Network is 'saturated'. Decrease Multiplier.")
     else:
-        print(f"  ✅ Network activity is in a plausible range ({avg_train_active_pct:.1f}%).")
-    # --- END DEBUGGING STATS ---
+        print(f"  ✅ Network activity is in a plausible range.")
 
-
-    # Calculate trace statistics
-    print(f"\n--- Trace Statistics ---")
-    print(f"  Trace value range: [{X_train_traces.min():.3f}, {X_train_traces.max():.3f}]")
-    print(f"  Mean trace value: {X_train_traces.mean():.3f}")
-    print(f"  Std trace value: {X_train_traces.std():.3f}")
-    print("-------------------------")
-
-    # Save with sentence-level split marker
+    # 7. Save Data
     output_file = "lsm_trace_sequences.npz"
     print(f"\nSaving to '{output_file}'...")
     np.savez_compressed(
@@ -543,14 +530,8 @@ def main(multiplier: float, leak: float, leak_variance_divisor: float = None):
     )
 
     print("\n" + "="*60)
-    print("✅ SENTENCE-LEVEL TRACE EXTRACTION COMPLETE! (500 SENTENCES)")
+    print("✅ SENTENCE-LEVEL TRACE EXTRACTION COMPLETE!")
     print(f"Saved to: {output_file}")
-    print("\n🎯 IMPORTANT: These are MEMBRANE POTENTIAL TRACES!")
-    print("   Continuous voltage signals (not spike features)")
-    print("   Test set contains COMPLETELY UNSEEN sentences!")
-    print("   Dataset: 400 train sentences, 100 test sentences")
-    print("\nNext step:")
-    print("  python train_ctc.py  # Train on trace data (modify to load trace file)")
     print("="*60 + "\n")
 
 
@@ -568,13 +549,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--leak",
         type=float,
-        default=0,
+        default=0.001,
         help="Leak coefficient (e.g., 0.01 to 0.1). Higher = faster leak / shorter memory."
     )
     parser.add_argument(
         "--leak-variance-divisor",
         type=float,
-        default=None,
+        default=20,
         help="Divisor for leak variance (e.g., 20 means std = leak/20). If not set, all neurons use same leak."
     )
 
