@@ -13,37 +13,43 @@ from sklearn.metrics.pairwise import cosine_similarity
 # --- Network Parameters (matching the spike feature version) ---
 NUM_NEURONS = 2000
 NUM_OUTPUT_NEURONS = 700
-# LEAK_COEFFICIENT = 0.02  # <-- MODIFIED: This is now set by --leak arg
 REFRACTORY_PERIOD = 2
 MEMBRANE_THRESHOLD = 2
-SMALL_WORLD_P = 0.3
-SMALL_WORLD_K = int(0.10 * NUM_NEURONS * 2)
+CURRENT_AMPLITUDE = MEMBRANE_THRESHOLD  # Following professor's convention
+PRESYNAPTIC_DEGREE = 0.10
+SMALL_WORLD_P = 0.2
+SMALL_WORLD_K = int(PRESYNAPTIC_DEGREE * NUM_NEURONS * 2)
 
 np.random.seed(42)
 
 
-def calculate_theoretical_w_critico(lsm_params, input_data):
-    """Calculate theoretical critical weight"""
-    num_samples = min(500, len(input_data))
-    total_spikes = 0
-    total_elements = 0
-    for sample in input_data[:num_samples]:
-        total_spikes += np.sum(sample)
-        total_elements += (sample.shape[0] * sample.shape[1])
+def compute_critical_weight(input_data: np.ndarray) -> float:
+    """
+    Estimate the critical synaptic weight based on average input current.
+    Uses global network parameters directly (no temp SNN needed).
+    """
+    # Average input current per neuron per timestep
+    total_spikes = np.sum(input_data)
+    total_elements = input_data.shape[0] * input_data.shape[1] * input_data.shape[2]
+
     if total_elements == 0:
         return 0.007
-    avg_I = total_spikes / total_elements
-    beta = lsm_params.small_world_graph_k / 2
-    if beta == 0:
-        return 0.007
-    numerator = (lsm_params.membrane_threshold - 2 * avg_I * lsm_params.refractory_period)
-    w_critico = numerator / beta
-    print("\n--- Theoretical Calculation ---")
-    print(f"  Avg Input Rate (I): {avg_I:.6f} (spikes/neuron/timestep)")
-    print(f"  Connectivity (beta): {beta:.1f} (k/2)")
-    print(f"  Calculated w_critico: {w_critico:.8f}")
-    print("-------------------------------")
-    return w_critico
+
+    avg_input_current = total_spikes / total_elements
+
+    # Critical weight formula (following professor's approach)
+    critical_weight = (
+        MEMBRANE_THRESHOLD
+        - 2 * avg_input_current * CURRENT_AMPLITUDE * (REFRACTORY_PERIOD + 1)
+    ) / (PRESYNAPTIC_DEGREE * NUM_NEURONS)
+
+    print("\n--- Critical Weight Calculation ---")
+    print(f"  Avg Input Current: {avg_input_current:.6f} (spikes/neuron/timestep)")
+    print(f"  Presynaptic Degree: {PRESYNAPTIC_DEGREE}")
+    print(f"  Calculated w_critico: {critical_weight:.8f}")
+    print("-----------------------------------")
+
+    return critical_weight
 
 
 def load_spike_dataset(filename="sentence_spike_trains.npz"):
@@ -410,31 +416,12 @@ def main(multiplier: float, leak: float, leak_variance_divisor: float = None):
         X_spikes, y_labels, test_size=0.2, random_state=42
     )
 
-    # 3. Calculate w_critico (Using Temporary Params)
-    # We need a dummy object just to calculate the critical weight scaling
-    temp_params = SimulationParams(
-        num_neurons=NUM_NEURONS,
-        mean_weight=0.0,
-        weight_variance=5.0,
-        num_output_neurons=NUM_OUTPUT_NEURONS,
-        is_random_uniform=False,
-        membrane_threshold=MEMBRANE_THRESHOLD,
-        leak_coefficient=leak,
-        refractory_period=REFRACTORY_PERIOD,
-        small_world_graph_p=SMALL_WORLD_P,
-        small_world_graph_k=SMALL_WORLD_K,
-        input_spike_times=X_train[0],
-        mean_distance=0.0, # Dummy value required for class validation
-        leak_variance_divisor=leak_variance_divisor
-    )
-
-    w_critico_calculated = calculate_theoretical_w_critico(temp_params, X_train)
+    # 3. Calculate critical weight directly from input data (no temp SNN needed)
+    critical_weight = compute_critical_weight(X_train)
     
     # 4. Calculate Optimal Weight and Distance
-    optimal_weight = w_critico_calculated * multiplier
+    optimal_weight = critical_weight * multiplier
     
-    # Use the Professor's Ratio: Distance = 15 * Weight
-    # This ensures the excitatory/inhibitory clusters separate as weights get stronger
     distance_coeff = 15.0 
     optimal_distance = distance_coeff * optimal_weight
 
@@ -454,21 +441,16 @@ def main(multiplier: float, leak: float, leak_variance_divisor: float = None):
     base_params = SimulationParams(
         num_neurons=NUM_NEURONS,
         mean_weight=optimal_weight,
-        
-        # FIXED VARIANCE: Use 5.0 (High Variance/Hubs) instead of scaling by weight
-        weight_variance=5.0, 
-        
+        weight_variance=20.0,
         num_output_neurons=NUM_OUTPUT_NEURONS,
-        is_random_uniform=False,
+        is_random_uniform=False,  # Use small-world connectivity
         membrane_threshold=MEMBRANE_THRESHOLD,
         leak_coefficient=leak,
         refractory_period=REFRACTORY_PERIOD,
         small_world_graph_p=SMALL_WORLD_P,
         small_world_graph_k=SMALL_WORLD_K,
         input_spike_times=X_train[0],
-        
-        # NEW MANDATORY PARAMS
-        mean_distance=optimal_distance, 
+        mean_distance=15.0 * optimal_weight,
         leak_variance_divisor=leak_variance_divisor
     )
     
@@ -542,14 +524,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--multiplier",
         type=float,
-        default=0.4,
+        default=1.2,
         help="Multiplier for w_critico (try 0.7-0.9)"
     )
     # --- MODIFIED: Added leak argument ---
     parser.add_argument(
         "--leak",
         type=float,
-        default=0.001,
+        default=0.01,
         help="Leak coefficient (e.g., 0.01 to 0.1). Higher = faster leak / shorter memory."
     )
     parser.add_argument(
