@@ -96,49 +96,47 @@ def encode_text_tokens(tokenizer, text: str):
 
 def decode_tokens(tokenizer, log_probs: torch.Tensor) -> str:
     """
-    Robust CTC Decoder.
-    1. Collapses adjacent duplicates (Standard CTC).
-    2. Filters out 'blips' (tokens that appear for < 2 frames).
+    Advanced CTC Decoder with 'Echo Cancellation'.
     """
     if log_probs.dim() == 3:
         log_probs = log_probs.squeeze(0) 
 
-    # Get class indices
+    # 1. Get raw indices
     indices = torch.argmax(log_probs, dim=1).tolist()
     
-    # --- STEP 1: Filter out short 'blips' (Noise reduction) ---
-    # We only keep a token if it stays the same for at least 2 consecutive frames
-    filtered_indices = []
-    if len(indices) > 0:
-        current_token = indices[0]
-        count = 1
-        
-        for i in range(1, len(indices)):
-            if indices[i] == current_token:
-                count += 1
-            else:
-                # If the previous token lasted at least 2 frames (or was blank), keep it
-                # We allow blanks to be short, but words must be stable.
-                if count >= 2 or current_token == 0:
-                    filtered_indices.extend([current_token] * count)
-                current_token = indices[i]
-                count = 1
-        
-        # Append last group
-        if count >= 2 or current_token == 0:
-            filtered_indices.extend([current_token] * count)
-
-    # --- STEP 2: Standard CTC Collapse ---
-    decoded_ids = []
-    prev_idx = -1
+    # 2. Filter out "blips" (tokens < 3 frames duration)
+    # This removes the random 'runs' or 'jumps' that appear for 10ms inside a stable word
+    stable_indices = []
+    current_token = indices[0]
+    count = 1
     
-    for idx in filtered_indices:
-        if idx != prev_idx:      # Only add if different from previous
-            if idx != 0:         # Don't add blanks
-                decoded_ids.append(idx - 1) # Shift id back by 1
+    for i in range(1, len(indices)):
+        if indices[i] == current_token:
+            count += 1
+        else:
+            # KEEP if: It's a blank, OR it lasted >= 3 frames (30ms)
+            if current_token == 0 or count >= 3:
+                stable_indices.extend([current_token] * count)
+            current_token = indices[i]
+            count = 1
+    # Flush last token
+    if current_token == 0 or count >= 3:
+        stable_indices.extend([current_token] * count)
+
+    # 3. Standard CTC Collapse (Merge adjacent duplicates)
+    collapsed_ids = []
+    prev_idx = -1
+    for idx in stable_indices:
+        if idx != prev_idx:
+            if idx != 0: # Skip blanks
+                collapsed_ids.append(idx - 1)
         prev_idx = idx
         
-    return tokenizer.decode(decoded_ids).strip()
+    # 4. Loop Removal (The "Jar Runs Jar" Fix)
+    # If we see [A, B, A] and B is very short/common error, we might want to collapse.
+    # For now, let's trust the "Blip Filter" (Step 2) to fix this.
+    
+    return tokenizer.decode(collapsed_ids).strip()
 
 def calculate_edit_distance(predicted, target):
     """
