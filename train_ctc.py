@@ -18,7 +18,7 @@ INDEX_MAP = {i + 1: char for i, char in enumerate(CHAR_LIST)}
 INDEX_MAP[BLANK_TOKEN] = "<b>"  # Representation for "blank"
 
 
-def load_label_map(filepath="sentence_label_map_500.txt"):
+def load_label_map(filepath="sentence_label_map.txt"):
     """Loads the 'sentence_label_map.txt' file into a dictionary."""
     if not Path(filepath).exists():
         print(f"❌ Error: Label map not found at '{filepath}'")
