@@ -31,8 +31,10 @@ python create_balanced_sentence_split.py
 # Step 4: Extract LSM membrane potential traces
 python extract_lsm_traces.py --multiplier 0.4 --leak 0.001 --leak-variance-divisor 20
 
-# Step 5: Train CTC readout model
-python train_ctc_traces.py
+# Step 5: Train CTC readout model (multiple training variants available)
+python train_ctc_traces.py              # Standard 3-layer BiGRU readout
+python train_ctc_traces_linear.py       # Purist linear readout (avg pool + linear)
+python train_ctc.py                     # Alternative training approach
 ```
 
 ### Diagnostics
@@ -61,8 +63,9 @@ Audio (.wav) → Gammatone Filterbank → Spike Trains → LSM Reservoir → Mem
    - Heterogeneous leak factors for temporal diversity
    - Output: `lsm_trace_sequences.npz` (membrane potentials over time)
 
-3. **CTC Training** (`train_ctc_traces.py`)
-   - 3-layer bidirectional GRU (128 hidden units)
+3. **CTC Training** (multiple readout variants)
+   - `train_ctc_traces.py`: 3-layer bidirectional GRU (128 hidden units)
+   - `train_ctc_traces_linear.py`: Purist linear readout using BPE tokenizer (vocab_size=100, stride=10 for temporal downsampling)
    - Character vocabulary: space + a-z + apostrophe (29 classes including blank)
    - Uses sentence-level train/test split for true generalization testing
 
@@ -78,11 +81,12 @@ Audio (.wav) → Gammatone Filterbank → Spike Trains → LSM Reservoir → Mem
 
 ### Output Files
 
-- `sentence_spike_trains.npz` - Encoded spike trains
+- `sentence_spike_trains.npz` - Encoded spike trains (samples × 128 neurons × 2000 timesteps)
 - `sentence_label_map.txt` - Sentence ID → text mapping
 - `balanced_sentence_split.npz` - Train/test sentence IDs
-- `lsm_trace_sequences.npz` - LSM membrane potential traces
-- `ctc_model_traces.pt` - Trained PyTorch model
+- `lsm_trace_sequences.npz` - LSM membrane potential traces (samples × 2000 timesteps × 700 neurons)
+- `ctc_model_traces.pt` - Trained PyTorch model (GRU variant)
+- `ctc_model_sentence_split.pt` - Alternative trained model
 - `lsm_raster_plot.png` - Spike activity visualization
 
 ## Important Notes
@@ -91,3 +95,20 @@ Audio (.wav) → Gammatone Filterbank → Spike Trains → LSM Reservoir → Mem
 - Check `diagnose_lsm_separability.py` output if accuracy is low - it identifies LSM tuning issues
 - Target network activity: 1-50% of reservoir neurons active (check debugging output)
 - The `snn_reservoir_py` package provides the core LSM implementation
+- Audio data augmentation is controlled by `NUM_AUGMENTATIONS` in `audio_encoding.py` (default: 1, no augmentation)
+- Dataset generation uses 35-word vocabulary with full alphabet coverage (a-z)
+- `generate_sentences.py` uses `chatterbox-tts` for local TTS generation (requires: `pip install chatterbox-tts`)
+
+## Environment Setup
+
+```bash
+# Create virtual environment
+python3 -m venv .venv
+source .venv/bin/activate  # On Linux/Mac
+
+# Install dependencies
+pip install -r requirements.txt
+
+# For sentence generation (if not already installed)
+pip install chatterbox-tts
+```

@@ -137,7 +137,7 @@ def decode_tokens(tokenizer, log_probs: torch.Tensor) -> str:
     # For now, let's trust the "Blip Filter" (Step 2) to fix this.
     
     return tokenizer.decode(collapsed_ids).strip()
-
+            
 def calculate_edit_distance(predicted, target):
     """
     Returns (edit_distance, target_length)

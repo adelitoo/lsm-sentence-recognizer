@@ -524,7 +524,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--multiplier",
         type=float,
-        default=1.0,
+        default=1.6,
         help="Multiplier for w_critico (try 0.7-0.9)"
     )
     # --- MODIFIED: Added leak argument ---
