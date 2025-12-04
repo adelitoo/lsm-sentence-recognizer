@@ -12,7 +12,8 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 # --- Network Parameters (matching the spike feature version) ---
 NUM_NEURONS = 2000
-NUM_OUTPUT_NEURONS = 700
+# NUM_OUTPUT_NEURONS will be set dynamically based on --include-input-neurons flag
+NUM_OUTPUT_NEURONS = None  # Will be calculated: all reservoir neurons or all neurons
 REFRACTORY_PERIOD = 2
 MEMBRANE_THRESHOLD = 2
 CURRENT_AMPLITUDE = MEMBRANE_THRESHOLD  # Following professor's convention
@@ -282,10 +283,16 @@ def generate_raster_plot(lsm, spike_sample, multiplier, plot_filename="lsm_raste
 # --- ---------------------- ---
 
 
-def extract_membrane_traces(lsm, spike_sample, output_neurons):
+def extract_membrane_traces(lsm, spike_sample, output_neurons, include_input_neurons=False):
     """
-    Extract membrane potential traces from LSM output neurons over time.
-    
+    Extract membrane potential traces from LSM neurons over time.
+
+    Args:
+        lsm: The LSM reservoir object
+        spike_sample: Input spike train
+        output_neurons: Array of neuron indices to extract traces from
+        include_input_neurons: If True, extract traces from input neurons too
+
     *** MODIFIED: Now also returns debugging info (total_reservoir_spikes, num_active_reservoir_neurons) ***
     """
     lsm.reset()
@@ -376,35 +383,45 @@ def extract_membrane_traces(lsm, spike_sample, output_neurons):
     return membrane_trace, total_reservoir_spikes, len(active_reservoir_neurons)
 
 
-def extract_dataset_traces(lsm, spike_data, desc=""):
+def extract_dataset_traces(lsm, spike_data, desc="", include_input_neurons=False, batch_size=50):
     """
-    Extract membrane traces for entire dataset
-    
+    Extract membrane traces for entire dataset using chunked processing for memory efficiency.
+
     *** MODIFIED: Now also returns debugging info (spike counts, active counts) ***
+    *** MEMORY OPTIMIZED: Pre-allocates array and fills in chunks to avoid OOM at 100% ***
     """
-    all_traces = []
-    
-    # --- 🧠 DEBUGGING ---
-    all_reservoir_spikes = []
-    all_active_counts = []
-    # --- END DEBUGGING ---
+    num_samples = len(spike_data)
 
-    for sample in tqdm(spike_data, desc=desc):
-        # --- MODIFIED: Get new metrics ---
-        traces, total_spikes, active_count = extract_membrane_traces(lsm, sample, lsm.output_neurons)
-        
-        all_traces.append(traces)
+    # Get dimensions from first sample
+    first_trace, first_spikes, first_active = extract_membrane_traces(
+        lsm, spike_data[0], lsm.output_neurons, include_input_neurons=include_input_neurons
+    )
+    num_timesteps, num_output = first_trace.shape
 
-        # --- DEBUGGING ---
-        all_reservoir_spikes.append(total_spikes)
-        all_active_counts.append(active_count)
-        # --- END DEBUGGING ---
+    # Pre-allocate the output arrays (more memory efficient than appending)
+    all_traces = np.zeros((num_samples, num_timesteps, num_output), dtype=np.float32)
+    all_reservoir_spikes = np.zeros(num_samples, dtype=np.int32)
+    all_active_counts = np.zeros(num_samples, dtype=np.int32)
 
-    # --- MODIFIED: Return new metrics ---
-    return np.array(all_traces, dtype=np.float32), np.array(all_reservoir_spikes), np.array(all_active_counts)
+    # Store first sample results
+    all_traces[0] = first_trace
+    all_reservoir_spikes[0] = first_spikes
+    all_active_counts[0] = first_active
+
+    # Process remaining samples with progress bar
+    for i in tqdm(range(1, num_samples), desc=desc, initial=1, total=num_samples):
+        traces, total_spikes, active_count = extract_membrane_traces(
+            lsm, spike_data[i], lsm.output_neurons, include_input_neurons=include_input_neurons
+        )
+
+        all_traces[i] = traces
+        all_reservoir_spikes[i] = total_spikes
+        all_active_counts[i] = active_count
+
+    return all_traces, all_reservoir_spikes, all_active_counts
 
 
-def main(multiplier: float, leak: float, leak_variance_divisor: float = None):
+def main(multiplier: float, leak: float, leak_variance_divisor: float = None, include_input_neurons: bool = False):
 
     # 1. Load spike dataset
     X_spikes, y_labels = load_spike_dataset(filename="sentence_spike_trains.npz")
@@ -418,31 +435,49 @@ def main(multiplier: float, leak: float, leak_variance_divisor: float = None):
 
     # 3. Calculate critical weight directly from input data (no temp SNN needed)
     critical_weight = compute_critical_weight(X_train)
-    
+
     # 4. Calculate Optimal Weight and Distance
     optimal_weight = critical_weight * multiplier
-    
-    distance_coeff = 15.0 
+
+    distance_coeff = 15.0
     optimal_distance = distance_coeff * optimal_weight
 
     print(f"\nUsing weight multiplier: {multiplier:.2f}")
     print(f"  FINAL WEIGHT USED: {optimal_weight:.8f}")
     print(f"  MEAN DISTANCE: {optimal_distance:.8f}")
     print(f"  LEAK COEFFICIENT: {leak:.4f}")
-    
+
     if leak_variance_divisor is not None:
         print(f"  HETEROGENEOUS LEAK: Enabled (Divisor {leak_variance_divisor})")
     else:
         print(f"  HETEROGENEOUS LEAK: Disabled (Uniform)")
 
-    # 5. Create the Real Reservoir
-    print(f"\nCreating Reservoir ({NUM_NEURONS} neurons, {NUM_OUTPUT_NEURONS} outputs)...")
-    
+    # 5. Determine output neurons to use
+    num_input_neurons = X_train[0].shape[0]  # 128 input neurons
+
+    if include_input_neurons:
+        # Use ALL neurons (input + reservoir)
+        print(f"\n🔬 MODE: Using ALL neurons (input + reservoir)")
+        output_neurons_to_use = np.arange(NUM_NEURONS)
+        num_output_neurons = NUM_NEURONS
+    else:
+        # Use only reservoir neurons (exclude input neurons)
+        print(f"\n🔬 MODE: Using RESERVOIR neurons only (excluding input)")
+        output_neurons_to_use = np.arange(num_input_neurons, NUM_NEURONS)
+        num_output_neurons = NUM_NEURONS - num_input_neurons
+
+    print(f"  Input neurons: {num_input_neurons}")
+    print(f"  Reservoir neurons: {NUM_NEURONS - num_input_neurons}")
+    print(f"  Output neurons for readout: {num_output_neurons}")
+
+    # 6. Create the Real Reservoir with explicit output_neurons
+    print(f"\nCreating Reservoir ({NUM_NEURONS} neurons, {num_output_neurons} outputs)...")
+
     base_params = SimulationParams(
         num_neurons=NUM_NEURONS,
         mean_weight=optimal_weight,
         weight_variance=20.0,
-        num_output_neurons=NUM_OUTPUT_NEURONS,
+        output_neurons=output_neurons_to_use,  # Explicitly specify which neurons to use
         is_random_uniform=False,  # Use small-world connectivity
         membrane_threshold=MEMBRANE_THRESHOLD,
         leak_coefficient=leak,
@@ -453,7 +488,7 @@ def main(multiplier: float, leak: float, leak_variance_divisor: float = None):
         mean_distance=15.0 * optimal_weight,
         leak_variance_divisor=leak_variance_divisor
     )
-    
+
     # Use Reservoir class (not SNN)
     lsm = Reservoir(simulation_params=base_params)
     
@@ -465,11 +500,15 @@ def main(multiplier: float, leak: float, leak_variance_divisor: float = None):
     # --- 📊 Generate Raster Plot for first training sample ---
     generate_raster_plot(lsm, X_train[0], multiplier, "lsm_raster_plot.png")
 
-    # 6. Extract membrane potential traces
+    # 7. Extract membrane potential traces
     print("\nExtracting membrane potential traces (full dataset)...")
-    
-    X_train_traces, train_spikes, train_active = extract_dataset_traces(lsm, X_train, "Training")
-    X_test_traces, test_spikes, test_active = extract_dataset_traces(lsm, X_test, "Testing")
+
+    X_train_traces, train_spikes, train_active = extract_dataset_traces(
+        lsm, X_train, "Training", include_input_neurons=include_input_neurons
+    )
+    X_test_traces, test_spikes, test_active = extract_dataset_traces(
+        lsm, X_test, "Testing", include_input_neurons=include_input_neurons
+    )
 
     print(f"\nExtracted traces:")
     print(f"  Train shape: {X_train_traces.shape}") 
@@ -498,8 +537,16 @@ def main(multiplier: float, leak: float, leak_variance_divisor: float = None):
     else:
         print(f"  ✅ Network activity is in a plausible range.")
 
-    # 7. Save Data
-    output_file = "lsm_trace_sequences.npz"
+    # 8. Save Data
+    if include_input_neurons:
+        # Use descriptive filename when including input neurons
+        output_file = "lsm_trace_sequences_all_neurons.npz"
+        split_type_label = 'sentence_level_all_neurons'
+    else:
+        # Keep default filename for reservoir-only (backward compatible)
+        output_file = "lsm_trace_sequences.npz"
+        split_type_label = 'sentence_level_reservoir_only'
+
     print(f"\nSaving to '{output_file}'...")
     np.savez_compressed(
         output_file,
@@ -508,7 +555,9 @@ def main(multiplier: float, leak: float, leak_variance_divisor: float = None):
         X_test_sequences=X_test_traces,
         y_test=y_test,
         final_weight=optimal_weight,
-        split_type='sentence_level_500_traces'
+        split_type=split_type_label,
+        include_input_neurons=include_input_neurons,
+        num_output_neurons=num_output_neurons
     )
 
     print("\n" + "="*60)
@@ -524,7 +573,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--multiplier",
         type=float,
-        default=1.6,
+        default=1.7,
         help="Multiplier for w_critico (try 0.7-0.9)"
     )
     # --- MODIFIED: Added leak argument ---
@@ -540,6 +589,11 @@ if __name__ == "__main__":
         default=20,
         help="Divisor for leak variance (e.g., 20 means std = leak/20). If not set, all neurons use same leak."
     )
+    parser.add_argument(
+        "--include-input-neurons",
+        action="store_true",
+        help="Include input neurons in the output traces (default: only reservoir neurons)"
+    )
 
     args = parser.parse_args()
 
@@ -548,5 +602,10 @@ if __name__ == "__main__":
     print("Testing TRUE generalization to unseen sentences!")
     print("="*60)
 
-    # --- MODIFIED: Pass leak to main ---
-    main(multiplier=args.multiplier, leak=args.leak, leak_variance_divisor=args.leak_variance_divisor)
+    # --- MODIFIED: Pass all arguments to main ---
+    main(
+        multiplier=args.multiplier,
+        leak=args.leak,
+        leak_variance_divisor=args.leak_variance_divisor,
+        include_input_neurons=args.include_input_neurons
+    )

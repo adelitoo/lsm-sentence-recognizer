@@ -7,6 +7,8 @@ from pathlib import Path
 import itertools
 from torch.utils.data import Dataset, DataLoader
 import warnings
+import argparse
+import os
 
 # --- TOKENIZER IMPORTS ---
 from tokenizers import Tokenizer
@@ -174,7 +176,7 @@ def ctc_collate_fn(batch):
 # ==========================================
 # === MAIN TRAINING LOOP ===
 # ==========================================
-def train():
+def train(force_cpu=False):
     print("=" * 60)
     print("🧪 EXPERIMENT: The Purist Readout (Average + Linear)")
     print("   Goal: Prove the LSM is doing the work.")
@@ -198,16 +200,62 @@ def train():
     y_train_text = [label_map[i] for i in y_train]
     y_test_text = [label_map[i] for i in y_test]
 
-    # 3. Normalize & Tensor
+    # 3. Normalize & Tensor (MEMORY OPTIMIZED)
     print("Normalizing data...")
-    X_train_flat = X_train.reshape(-1, X_train.shape[-1])
-    mean, std = X_train_flat.mean(0), X_train_flat.std(0) + 1e-8
-    del X_train_flat
-    
-    X_train_tensor = torch.FloatTensor((X_train - mean) / std)
-    X_test_tensor = torch.FloatTensor((X_test - mean) / std)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Running on device: {device}")
+    print(f"  Data shape: Train={X_train.shape}, Test={X_test.shape}")
+
+    # Calculate statistics in chunks to avoid memory spike
+    print("  Computing mean and std...")
+    num_samples, num_timesteps, num_features = X_train.shape
+
+    # Use online algorithm for mean/std (Welford's method - memory efficient)
+    mean = np.zeros(num_features, dtype=np.float64)
+    m2 = np.zeros(num_features, dtype=np.float64)
+    n = 0
+
+    chunk_size = 50  # Process 50 samples at a time
+    from tqdm import tqdm
+    for i in tqdm(range(0, num_samples, chunk_size), desc="  Computing stats"):
+        chunk = X_train[i:i+chunk_size].reshape(-1, num_features)
+        for row in chunk:
+            n += 1
+            delta = row - mean
+            mean += delta / n
+            delta2 = row - mean
+            m2 += delta * delta2
+
+    std = np.sqrt(m2 / n) + 1e-8
+
+    print("  Converting to tensors (this may take a moment)...")
+    # Normalize in-place to avoid creating extra copies
+    X_train -= mean
+    X_train /= std
+    X_test -= mean
+    X_test /= std
+
+    # Convert to tensors (views, not copies)
+    X_train_tensor = torch.from_numpy(X_train).float()
+    X_test_tensor = torch.from_numpy(X_test).float()
+
+    # Free original numpy arrays to save RAM
+    del X_train, X_test, mean, std, m2
+    print("  ✓ Normalization complete")
+
+    # Device selection with memory awareness
+    if force_cpu:
+        device = torch.device("cpu")
+        print(f"Running on device: CPU (forced)")
+        print("⚠️  Training will be slower but use less memory")
+    else:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        print(f"Running on device: {device}")
+
+        if torch.cuda.is_available():
+            print(f"GPU: {torch.cuda.get_device_name(0)}")
+            print(f"GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
+            print(f"Features: {X_train_tensor.shape[2]} neurons (increased from 700)")
+            print("⚠️  Note: Keeping data on CPU, moving batches to GPU as needed")
+            print("⚠️  If you get OOM errors, run with --cpu flag")
 
     y_train_encoded = [encode_text_tokens(tokenizer, t) for t in y_train_text]
     
@@ -224,9 +272,18 @@ def train():
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.5, patience=20, verbose=True)
     loss_fn = nn.CTCLoss(blank=CTC_BLANK_TOKEN, zero_infinity=True)
 
+    # MEMORY OPTIMIZATION: Reduce batch size for larger models
+    # Original batch_size=32 works for 700 neurons, but 1872 neurons needs smaller batches
+    batch_size = 16 if X_train_tensor.shape[2] > 1000 else 32
+    print(f"Using batch size: {batch_size} (adjusted for {X_train_tensor.shape[2]} features)")
+
     train_loader = DataLoader(
-        TraceDataset(X_train_tensor, y_train_encoded), 
-        batch_size=32, shuffle=True, collate_fn=ctc_collate_fn
+        TraceDataset(X_train_tensor, y_train_encoded),
+        batch_size=batch_size,
+        shuffle=True,
+        collate_fn=ctc_collate_fn,
+        num_workers=0,  # Keep 0 to avoid memory duplication
+        pin_memory=False  # Disable to save memory
     )
 
     # 5. Training
@@ -235,7 +292,7 @@ def train():
         for epoch in range(1000):
             model.train()
             epoch_loss = 0.0
-            
+
             for x, y, lx, ly in train_loader:
                 x, y, lx, ly = x.to(device), y.to(device), lx.to(device), ly.to(device)
                 optimizer.zero_grad()
@@ -244,6 +301,10 @@ def train():
                 loss.backward()
                 optimizer.step()
                 epoch_loss += loss.item()
+
+                # MEMORY OPTIMIZATION: Clear GPU cache periodically
+                if device.type == 'cuda':
+                    torch.cuda.empty_cache()
                 
             avg_loss = epoch_loss / len(train_loader)
             scheduler.step(avg_loss)
@@ -305,8 +366,13 @@ def train():
 
     with torch.no_grad():
         for i in range(len(X_test_tensor)):
+            # MEMORY OPTIMIZATION: Process one sample at a time and clear cache
             out = model(X_test_tensor[i].unsqueeze(0).to(device))
             pred = decode_tokens(tokenizer, out.cpu())
+
+            # Clear GPU cache every 10 samples
+            if device.type == 'cuda' and i % 10 == 0:
+                torch.cuda.empty_cache()
             target = y_test_text[i]
             
             # Word-level stats
@@ -357,4 +423,8 @@ def train():
     print("="*60)
 
 if __name__ == "__main__":
-    train()
+    parser = argparse.ArgumentParser(description="Train CTC model on LSM traces")
+    parser.add_argument("--cpu", action="store_true", help="Force CPU training (slower but less memory)")
+    args = parser.parse_args()
+
+    train(force_cpu=args.cpu)
